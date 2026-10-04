@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import { supabase } from './supabase';
 import { fmtTime } from './format';
 import { Database } from '../types/database';
@@ -281,11 +282,13 @@ export async function deletePost(postId: string): Promise<void> {
 export async function uploadPostImage(uri: string): Promise<string> {
   const profileId = await currentProfileId();
 
-  const res = await fetch(uri);
-  const body: ArrayBuffer | Blob =
-    typeof res.arrayBuffer === 'function' ? await res.arrayBuffer() : await res.blob();
+  // The picker hands back a `file://` (or `content://`) URI, which `fetch` cannot
+  // read on a device. `expo-file-system` owns the bytes instead.
+  const file = new File(uri);
 
-  const rawExt = uri.split('?')[0].split('.').pop()?.toLowerCase() ?? 'jpg';
+  const rawExt = (file.extension || uri.split('?')[0].split('.').pop() || 'jpg')
+    .replace('.', '')
+    .toLowerCase();
   const ext = ['jpg', 'jpeg', 'png', 'webp', 'heic'].includes(rawExt) ? rawExt : 'jpg';
   const contentType =
     ext === 'png'
@@ -299,7 +302,7 @@ export async function uploadPostImage(uri: string): Promise<string> {
 
   const { error } = await supabase.storage
     .from('post-images')
-    .upload(path, body, { contentType, upsert: false });
+    .upload(path, await file.arrayBuffer(), { contentType, upsert: false });
   if (error) throw error;
 
   const { data } = supabase.storage.from('post-images').getPublicUrl(path);

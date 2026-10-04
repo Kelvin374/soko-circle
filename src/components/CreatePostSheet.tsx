@@ -20,8 +20,8 @@ import { colors } from '../theme/colors';
 import { radii } from '../theme';
 import { rgba } from '../utils/color';
 import { createPost, uploadPostImage } from '../lib/api';
-
-const CATEGORIES = ['Supply Chain', 'Mitumba', 'Electronics', 'Hardware', 'Financing'];
+import { usePostCategories } from '../hooks/useData';
+import { humanizeError } from '../lib/errors';
 
 const MIN_TITLE = 3;
 const MIN_BODY = 10;
@@ -39,7 +39,10 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
   const [category, setCategory] = useState<string | null>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [field, setField] = useState<'title' | 'body' | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const categoriesState = usePostCategories();
+  const categories = categoriesState.data ?? [];
 
   const reset = () => {
     setTitle('');
@@ -47,6 +50,7 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
     setCategory(null);
     setImageUri(null);
     setError(null);
+    setField(null);
   };
 
   const handleClose = () => {
@@ -55,7 +59,9 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
     onClose();
   };
 
-  const canSubmit = title.trim().length >= MIN_TITLE && body.trim().length >= MIN_BODY && !submitting;
+  const titleValid = title.trim().length >= MIN_TITLE;
+  const bodyValid = body.trim().length >= MIN_BODY;
+  const ready = titleValid && bodyValid && !submitting;
 
   const pickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -81,24 +87,30 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
   const handleSubmit = async () => {
     const trimmedTitle = title.trim();
     const trimmedBody = body.trim();
-    if (trimmedTitle.length < MIN_TITLE) {
+    if (!titleValid) {
+      setField('title');
       setError(`Give your post a title of at least ${MIN_TITLE} characters.`);
       return;
     }
-    if (trimmedBody.length < MIN_BODY) {
+    if (!bodyValid) {
+      setField('body');
       setError(`Add a little more detail — at least ${MIN_BODY} characters.`);
       return;
     }
     setError(null);
+    setField(null);
     setSubmitting(true);
     try {
       let imageUrl: string | undefined;
       if (imageUri) {
         try {
           imageUrl = await uploadPostImage(imageUri);
-        } catch {
+        } catch (e) {
           setError(
-            'Could not upload your image. Check your connection, or remove the photo and post without it.',
+            humanizeError(
+              e,
+              'Could not upload your image. Check your connection, or remove the photo and post without it.',
+            ),
           );
           return;
         }
@@ -112,11 +124,7 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
       reset();
       onCreated();
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : 'Could not publish your post. Check your connection and try again.',
-      );
+      setError(humanizeError(e, 'Could not publish your post. Check your connection and try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -155,14 +163,24 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
           )}
 
           <View style={styles.field}>
-            <ThemedText variant="labelSm" color={colors.onSurfaceVariant} style={styles.fieldLabel}>
-              Title
-            </ThemedText>
+            <View style={styles.fieldHead}>
+              <ThemedText variant="labelSm" color={colors.onSurfaceVariant} style={styles.fieldLabel}>
+                Title
+              </ThemedText>
+              <ThemedText
+                variant="labelSm"
+                color={field === 'title' ? colors.error : colors.outline}
+                style={styles.counter}
+              >
+                {title.trim().length}/{MIN_TITLE} min
+              </ThemedText>
+            </View>
             <TextInput
-              style={styles.input}
+              style={[styles.input, field === 'title' && styles.inputInvalid]}
               value={title}
               onChangeText={(t) => {
                 setTitle(t);
+                if (field === 'title') setField(null);
                 if (error) setError(null);
               }}
               placeholder="e.g. Where to source quality mtumba bales"
@@ -173,14 +191,24 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
           </View>
 
           <View style={styles.field}>
-            <ThemedText variant="labelSm" color={colors.onSurfaceVariant} style={styles.fieldLabel}>
-              Details
-            </ThemedText>
+            <View style={styles.fieldHead}>
+              <ThemedText variant="labelSm" color={colors.onSurfaceVariant} style={styles.fieldLabel}>
+                Details
+              </ThemedText>
+              <ThemedText
+                variant="labelSm"
+                color={field === 'body' ? colors.error : colors.outline}
+                style={styles.counter}
+              >
+                {body.trim().length}/{MIN_BODY} min
+              </ThemedText>
+            </View>
             <TextInput
-              style={[styles.input, styles.textArea]}
+              style={[styles.input, styles.textArea, field === 'body' && styles.inputInvalid]}
               value={body}
               onChangeText={(t) => {
                 setBody(t);
+                if (field === 'body') setField(null);
                 if (error) setError(null);
               }}
               placeholder="Share prices, suppliers, negotiation tactics or a question..."
@@ -225,7 +253,7 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
               Category (optional)
             </ThemedText>
             <View style={styles.chipWrap}>
-              {CATEGORIES.map((c) => {
+              {categories.map((c) => {
                 const active = category === c;
                 return (
                   <Pressable
@@ -250,8 +278,16 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
         <View style={styles.footer}>
           <Pressable
             onPress={handleSubmit}
-            disabled={!canSubmit}
-            style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
+            disabled={submitting}
+            accessibilityRole="button"
+            accessibilityLabel="Publish post"
+            accessibilityHint={
+              ready
+                ? 'Publishes your post to the community feed'
+                : 'A title of at least 3 characters and 10 characters of detail are required'
+            }
+            accessibilityState={{ disabled: submitting, busy: submitting }}
+            style={[styles.submitBtn, submitting && styles.submitBtnBusy]}
           >
             {submitting ? (
               <ActivityIndicator size="small" color={colors.onPrimary} />
@@ -264,6 +300,27 @@ export default function CreatePostSheet({ visible, onClose, onCreated }: Props) 
               </>
             )}
           </Pressable>
+          {!submitting && !ready && (
+            <Pressable
+              onPress={() => {
+                setField(!titleValid ? 'title' : 'body');
+                setError(
+                  !titleValid
+                    ? `Give your post a title of at least ${MIN_TITLE} characters.`
+                    : `Add a little more detail — at least ${MIN_BODY} characters.`,
+                );
+              }}
+              style={styles.nudge}
+              accessibilityRole="button"
+              accessibilityLabel="Show what is missing"
+            >
+              <ThemedText variant="labelSm" color={colors.onSurfaceVariant} style={styles.nudgeText}>
+                {titleValid
+                  ? `Add ${MIN_BODY - body.trim().length} more characters of detail`
+                  : `Add ${MIN_TITLE - title.trim().length} more characters to the title`}
+              </ThemedText>
+            </Pressable>
+          )}
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -324,6 +381,17 @@ const styles = StyleSheet.create({
   },
   field: {
     gap: 6,
+  },
+  fieldHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  counter: {
+    fontSize: 11,
+  },
+  inputInvalid: {
+    borderColor: colors.error,
   },
   fieldLabel: {
     fontSize: 12,
@@ -417,7 +485,14 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     backgroundColor: colors.primary,
   },
-  submitBtnDisabled: {
-    backgroundColor: colors.outlineVariant,
+  submitBtnBusy: {
+    opacity: 0.7,
+  },
+  nudge: {
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  nudgeText: {
+    fontSize: 11,
   },
 });
