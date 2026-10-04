@@ -28,12 +28,11 @@ const MIN_BODY = 10;
 
 type Props = {
   visible: boolean;
-  authorName: string;
   onClose: () => void;
   onCreated: () => void;
 };
 
-export default function CreatePostSheet({ visible, authorName, onClose, onCreated }: Props) {
+export default function CreatePostSheet({ visible, onClose, onCreated }: Props) {
   const insets = useSafeAreaInsets();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -95,24 +94,29 @@ export default function CreatePostSheet({ visible, authorName, onClose, onCreate
     try {
       let imageUrl: string | undefined;
       if (imageUri) {
-        const uploaded = await uploadPostImage(imageUri);
-        if (!uploaded) {
-          setError('Could not upload your image. Check your connection, or remove the photo and post without it.');
+        try {
+          imageUrl = await uploadPostImage(imageUri);
+        } catch {
+          setError(
+            'Could not upload your image. Check your connection, or remove the photo and post without it.',
+          );
           return;
         }
-        imageUrl = uploaded;
       }
       await createPost({
-        author_name: authorName,
         title: trimmedTitle,
         body: trimmedBody,
-        category: category ?? undefined,
-        image_url: imageUrl,
+        category,
+        image_url: imageUrl ?? null,
       });
       reset();
       onCreated();
-    } catch {
-      setError('Could not publish your post. Check your connection and try again.');
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'Could not publish your post. Check your connection and try again.',
+      );
     } finally {
       setSubmitting(false);
     }

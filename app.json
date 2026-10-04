@@ -29,7 +29,9 @@
           "cameraPermission": "SokoCircle uses your camera so you can take a photo to attach to your post.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "expo-sharing",
+      "expo-splash-screen"
     ]
   }
 }

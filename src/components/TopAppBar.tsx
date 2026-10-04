@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon, { IconName } from './Icon';
 import ThemedText from './ThemedText';
@@ -11,12 +11,16 @@ type Action = {
   icon: IconName;
   onPress?: () => void;
   color?: string;
+  /** Defaults to the action `icon` when omitted. */
+  accessibilityLabel?: string;
 };
 
 type Props = {
   title: string;
   leftIcon?: IconName;
+  /** When omitted the leading icon is decorative (non-interactive). */
   onLeftPress?: () => void;
+  leftAccessibilityLabel?: string;
   actions?: Action[];
   centerTitle?: boolean;
 };
@@ -25,6 +29,7 @@ export default function TopAppBar({
   title,
   leftIcon,
   onLeftPress,
+  leftAccessibilityLabel,
   actions = [],
   centerTitle = true,
 }: Props) {
@@ -48,22 +53,22 @@ export default function TopAppBar({
         ]}
       >
         <View style={[styles.side, { flex: centerTitle ? 1 : 0 }]}>
-          {leftIcon && (
-            <Pressable
-              onPress={
-                onLeftPress ??
-                (() =>
-                  Alert.alert(
-                    'Change Location',
-                    'Location selection is coming soon in the SokoCircle network.',
-                  ))
-              }
-              hitSlop={8}
-              style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-            >
-              <Icon name={leftIcon} color={colors.primary} />
-            </Pressable>
-          )}
+          {leftIcon &&
+            (onLeftPress ? (
+              <Pressable
+                onPress={onLeftPress}
+                accessibilityRole="button"
+                accessibilityLabel={leftAccessibilityLabel ?? title}
+                hitSlop={8}
+                style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
+              >
+                <Icon name={leftIcon} color={colors.primary} />
+              </Pressable>
+            ) : (
+              <View style={styles.iconBtn} accessibilityElementsHidden>
+                <Icon name={leftIcon} color={colors.primary} />
+              </View>
+            ))}
         </View>
 
         <ThemedText variant="headline" color={colors.primary} style={styles.title}>
@@ -75,6 +80,8 @@ export default function TopAppBar({
             <Pressable
               key={a.icon}
               onPress={() => handlePress(a)}
+              accessibilityRole="button"
+              accessibilityLabel={a.accessibilityLabel ?? a.icon}
               hitSlop={8}
               style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
             >
@@ -113,7 +120,10 @@ const styles = StyleSheet.create({
     fontFamily: type.headline.fontFamily,
   },
   iconBtn: {
-    padding: 6,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 999,
   },
   pressed: {

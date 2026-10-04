@@ -7,25 +7,42 @@ export type AsyncState<T> = {
   reload: () => void;
 };
 
-export function useAsyncData<T>(fetcher: () => Promise<T>, deps: unknown[] = []): AsyncState<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+type Result<T> = {
+  deps: readonly unknown[];
+  data: T | null;
+  error: Error | null;
+};
+
+function sameDeps(a: readonly unknown[], b: readonly unknown[]): boolean {
+  return a.length === b.length && a.every((dep, i) => Object.is(dep, b[i]));
+}
+
+function toError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+
+/**
+ * Runs `fetcher` whenever `deps` change and whenever `reload()` is called.
+ *
+ * `loading` is derived during render by comparing the deps of the stored result with
+ * the current deps, so no state is written synchronously inside the effect. Failures
+ * are surfaced through `error` - never replaced with placeholder data.
+ */
+export function useAsyncData<T>(
+  fetcher: () => Promise<T>,
+  deps: readonly unknown[] = [],
+): AsyncState<T> {
   const [tick, setTick] = useState(0);
+  const [result, setResult] = useState<Result<T> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
     fetcher()
-      .then((d) => {
-        if (!cancelled) setData(d);
+      .then((data) => {
+        if (!cancelled) setResult({ deps, data, error: null });
       })
-      .catch((e) => {
-        if (!cancelled) setError(e as Error);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+      .catch((value: unknown) => {
+        if (!cancelled) setResult({ deps, data: null, error: toError(value) });
       });
     return () => {
       cancelled = true;
@@ -33,5 +50,12 @@ export function useAsyncData<T>(fetcher: () => Promise<T>, deps: unknown[] = [])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
 
-  return { data, loading, error, reload: () => setTick((t) => t + 1) };
+  const current = result && sameDeps(result.deps, deps) ? result : null;
+
+  return {
+    data: current?.data ?? null,
+    loading: current === null,
+    error: current?.error ?? null,
+    reload: () => setTick((value) => value + 1),
+  };
 }

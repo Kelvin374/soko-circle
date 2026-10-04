@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,26 +13,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ThemedText from './ThemedText';
 import Icon from './Icon';
+import ErrorState from './ErrorState';
+import EmptyState from './EmptyState';
 import { colors } from '../theme/colors';
 import { radii } from '../theme';
 import { rgba } from '../utils/color';
 import { PostComment } from '../types';
-import { addComment, fetchComments } from '../lib/api';
-
-const MOCK_COMMENTS: PostComment[] = [
-  {
-    id: 'mock-comment-1',
-    authorName: 'Omondi A.',
-    body: 'Ksh 800 per unit for grade A? That is a good price, thanks for sharing!',
-    createdAt: '1h ago',
-  },
-  {
-    id: 'mock-comment-2',
-    authorName: 'Faith N.',
-    body: 'Could you share the negotiation tactics as a follow-up post? Would really help.',
-    createdAt: '3h ago',
-  },
-];
+import { createComment, fetchComments } from '../lib/api';
+import { useAsyncData } from '../hooks/useAsyncData';
 
 type Props = {
   visible: boolean;
@@ -42,40 +30,44 @@ type Props = {
 
 export default function PostComments({ visible, postId, onClose }: Props) {
   const insets = useSafeAreaInsets();
-  const [comments, setComments] = useState<PostComment[]>([]);
-  const [loading, setLoading] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [created, setCreated] = useState<PostComment[]>([]);
 
-  useEffect(() => {
-    if (!visible || !postId) return;
-    setLoading(true);
-    fetchComments(postId)
-      .then(setComments)
-      .catch(() => setComments(MOCK_COMMENTS))
-      .finally(() => setLoading(false));
-  }, [visible, postId]);
+  const {
+    data,
+    loading,
+    error: loadError,
+    reload,
+  } = useAsyncData<PostComment[]>(
+    async () => (visible && postId ? await fetchComments(postId) : []),
+    [visible, postId],
+  );
+
+  const comments = [...(data ?? []), ...created];
 
   const handleSend = async () => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
+
     setSending(true);
-    setComments((prev) => [
-      ...prev,
-      { id: Date.now().toString(), authorName: 'You', body: trimmed, createdAt: 'Just now' },
-    ]);
-    setText('');
+    setSendError(null);
     try {
-      await addComment(postId, 'You', trimmed);
-    } catch {
-      // offline / demo mode: comment stays local
+      const comment = await createComment(postId, trimmed);
+      setCreated((prev) => [...prev, comment]);
+      setText('');
+    } catch (e) {
+      setSendError(
+        e instanceof Error ? e.message : 'Could not post your comment. Please try again.',
+      );
     } finally {
       setSending(false);
     }
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -96,13 +88,20 @@ export default function PostComments({ visible, postId, onClose }: Props) {
           <View style={styles.centered}>
             <ActivityIndicator color={colors.primary} />
           </View>
+        ) : loadError ? (
+          <ErrorState
+            compact
+            title="Couldn't load comments"
+            error={loadError}
+            onRetry={reload}
+          />
         ) : comments.length === 0 ? (
-          <View style={styles.centered}>
-            <Icon name="chat-bubble-left-right" size={36} color={colors.outlineVariant} />
-            <ThemedText variant="bodyMd" color={colors.outline} style={{ marginTop: 8 }}>
-              No comments yet. Be the first to reply.
-            </ThemedText>
-          </View>
+          <EmptyState
+            compact
+            icon="chat-bubble-left-right"
+            title="No comments yet"
+            message="Be the first to reply to this post."
+          />
         ) : (
           <FlatList
             data={comments}
@@ -111,8 +110,16 @@ export default function PostComments({ visible, postId, onClose }: Props) {
             renderItem={({ item }) => (
               <View style={styles.commentRow}>
                 <View style={styles.commentAvatar}>
-                  <ThemedText variant="labelSm" color={colors.primary} style={{ fontSize: 11, fontWeight: '700' }}>
-                    {item.authorName.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                  <ThemedText
+                    variant="labelSm"
+                    color={colors.primary}
+                    style={{ fontSize: 11, fontWeight: '700' }}
+                  >
+                    {item.authorName
+                      .split(' ')
+                      .map((n) => n[0])
+                      .join('')
+                      .slice(0, 2)}
                   </ThemedText>
                 </View>
                 <View style={{ flex: 1 }}>
@@ -124,7 +131,11 @@ export default function PostComments({ visible, postId, onClose }: Props) {
                       {item.createdAt}
                     </ThemedText>
                   </View>
-                  <ThemedText variant="bodyMd" color={colors.onSurfaceVariant} style={{ marginTop: 2, fontSize: 14 }}>
+                  <ThemedText
+                    variant="bodyMd"
+                    color={colors.onSurfaceVariant}
+                    style={{ marginTop: 2, fontSize: 14 }}
+                  >
                     {item.body}
                   </ThemedText>
                 </View>
@@ -133,21 +144,40 @@ export default function PostComments({ visible, postId, onClose }: Props) {
           />
         )}
 
+        {sendError && (
+          <View style={styles.sendError}>
+            <Icon name="exclamation-triangle" size={16} color={colors.error} />
+            <ThemedText variant="labelSm" color={colors.error} style={{ flex: 1 }}>
+              {sendError}
+            </ThemedText>
+          </View>
+        )}
+
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
             placeholder="Add a comment..."
             placeholderTextColor={colors.outline}
             value={text}
-            onChangeText={setText}
+            onChangeText={(t) => {
+              setText(t);
+              if (sendError) setSendError(null);
+            }}
+            editable={!loadError}
             multiline
           />
           <Pressable
-            onPress={handleSend}
-            disabled={!text.trim() || sending}
-            style={[styles.sendBtn, (!text.trim() || sending) && { opacity: 0.4 }]}
+            onPress={() => void handleSend()}
+            disabled={!text.trim() || sending || Boolean(loadError)}
+            accessibilityRole="button"
+            accessibilityLabel="Post comment"
+            style={[styles.sendBtn, (!text.trim() || sending || loadError) && { opacity: 0.4 }]}
           >
-            <Icon name="paper-airplane" size={18} color={colors.onPrimary} variant="solid" />
+            {sending ? (
+              <ActivityIndicator size="small" color={colors.onPrimary} />
+            ) : (
+              <Icon name="paper-airplane" size={18} color={colors.onPrimary} variant="solid" />
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -210,6 +240,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  sendError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: colors.errorContainer,
+    borderRadius: radii.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -232,9 +273,9 @@ const styles = StyleSheet.create({
     maxHeight: 80,
   },
   sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',

@@ -54,7 +54,7 @@ export default function AuthLayout({ title, subtitle, children, footer }: Props)
             SokoCircle
           </ThemedText>
           <ThemedText variant="bodyMd" color={colors.primaryFixedDim} style={styles.brandTag}>
-            Kenya's marketplace for MSME networks
+            Kenya{'\''}s marketplace for MSME networks
           </ThemedText>
           <ThemedText variant="titleMd" color={colors.gold} style={styles.screenTitle}>
             {title}

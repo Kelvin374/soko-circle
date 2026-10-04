@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -11,26 +10,33 @@ import {
 import TopAppBar from '../../components/TopAppBar';
 import ThemedText from '../../components/ThemedText';
 import Icon from '../../components/Icon';
+import ErrorState from '../../components/ErrorState';
+import EmptyState from '../../components/EmptyState';
 import { colors } from '../../theme/colors';
 import { radii, shadows, spacing } from '../../theme';
 import { rgba } from '../../utils/color';
-import { useAnalytics, useGapReports } from '../../hooks/useData';
+import { useAnalytics, useCategories, useGapReports, useProfile } from '../../hooks/useData';
+import { COUNTY_NAMES, POPULAR_WARDS } from '../../lib/locations';
+import { formatKsh } from '../../lib/format';
 import { GapReport } from '../../types';
 
 const TOPO_IMG =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuCUYG67f8lTVhR53Yovg5IZu6ZaNAEbCFqbRpPVXvVt10NAiSMDO6RSQOZJY6Sr1F6APzKPy2hSw1jM-TyqwWFp7knaznJnCkzKSxVlDJ9xs_9ggLmHrbc1sd48-8ab20KIx1aOxwyYDzNIXtP8lOcSWT-TUvCJBv8k2ryvPxhHlfzv_j-FUD9hKQH0IAmIQLB1qec2iHlWsdyj1shm1LhdmniWn3gNnb3DTgaCJmmOV1NtuBGJNX8T';
 
-const CATEGORIES = ['Electronics', 'Agro-Vet', 'Hardware', 'Fashion'];
-const LOCATIONS = ['Kayole, Nairobi', 'Kibera, Nairobi', 'Thika Town, Kiambu'];
+const LOCATION_OPTIONS = [
+  ...POPULAR_WARDS.map((w) => `${w.ward}, ${w.county}`),
+  ...COUNTY_NAMES,
+];
 
 type SelectProps = {
   label: string;
   options: string[];
   value: string;
   onChange: (v: string) => void;
+  disabled?: boolean;
 };
 
-function Select({ label, options, value, onChange }: SelectProps) {
+function Select({ label, options, value, onChange, disabled }: SelectProps) {
   const [open, setOpen] = useState(false);
   return (
     <View style={{ flex: 1 }}>
@@ -42,11 +48,14 @@ function Select({ label, options, value, onChange }: SelectProps) {
         {label}
       </ThemedText>
       <Pressable
-        onPress={() => setOpen((v) => !v)}
-        style={styles.selectInput}
+        onPress={() => !disabled && options.length > 0 && setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${value || 'none selected'}`}
+        accessibilityState={{ disabled: !!disabled || options.length === 0, expanded: open }}
+        style={[styles.selectInput, disabled && styles.selectInputDisabled]}
       >
-        <ThemedText variant="bodyMd" color={colors.onSurface}>
-          {value}
+        <ThemedText variant="bodyMd" color={colors.onSurface} numberOfLines={1}>
+          {value || 'None'}
         </ThemedText>
         <Icon name="chevron-down" size={20} color={colors.outline} />
       </Pressable>
@@ -81,13 +90,14 @@ function Select({ label, options, value, onChange }: SelectProps) {
 function StatBar({
   label,
   value,
+  pct,
   color,
 }: {
   label: string;
   value: string;
+  pct: number;
   color: string;
 }) {
-  const pct = parseInt(value, 10);
   return (
     <View>
       <View style={styles.statRow}>
@@ -99,22 +109,48 @@ function StatBar({
         </ThemedText>
       </View>
       <View style={styles.track}>
-        <View style={[styles.fill, { width: `${pct}%`, backgroundColor: color }]} />
+        <View
+          style={[
+            styles.fill,
+            { width: `${Math.max(0, Math.min(100, pct))}%`, backgroundColor: color },
+          ]}
+        />
       </View>
     </View>
   );
 }
 
 export default function GapMapScreen() {
-  const [category, setCategory] = useState(CATEGORIES[0]);
-  const [location, setLocation] = useState(LOCATIONS[0]);
+  const { data: profile } = useProfile();
+  const { data: categories } = useCategories();
+
+  const categoryOptions = useMemo(
+    () => (categories ?? []).map((c) => c.title),
+    [categories],
+  );
+
+  const [locationChoice, setLocationChoice] = useState<string | null>(null);
+  const [categoryChoice, setCategoryChoice] = useState<string | null>(null);
   const [capital, setCapital] = useState('500000');
   const [overhead, setOverhead] = useState('45000');
   const [revenue, setRevenue] = useState('130000');
-  const { data: reports } = useGapReports();
-  const { data: analytics, reload: reloadAnalytics } = useAnalytics(category, location);
 
-  const reportList = reports ?? [];
+  const location = locationChoice ?? profile?.location ?? 'Nairobi';
+  const category = categoryChoice ?? categoryOptions[0] ?? '';
+
+  const {
+    data: analytics,
+    loading: analyticsLoading,
+    error: analyticsError,
+    reload: reloadAnalytics,
+  } = useAnalytics(category || '__none__', location);
+
+  const {
+    data: reports,
+    loading: reportsLoading,
+    error: reportsError,
+    reload: reloadReports,
+  } = useGapReports(category || null);
 
   const capitalN = parseFloat(capital) || 0;
   const overheadN = parseFloat(overhead) || 0;
@@ -125,33 +161,79 @@ export default function GapMapScreen() {
       ? Math.max(1, Math.ceil(capitalN / monthlyProfit))
       : null;
 
-  const handleAnalyze = () => {
-    reloadAnalytics();
-    Alert.alert('Analysis Complete', `${category} in ${location.split(',')[0]} shows a strong opportunity score.`);
-  };
+  const hasCategory = categoryOptions.length > 0;
 
-  const handleUnlock = (report: GapReport) => {
-    Alert.alert(
-      'Unlock Report',
-      `Pay KSh ${report.price} via M-Pesa (Paybill 889201) to unlock "${report.title}".`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Pay Now', onPress: () => Alert.alert('Payment Successful', `"${report.title}" has been unlocked. Check your intelligence assets.`) },
-      ],
-    );
-  };
+  const renderReport = (report: GapReport) => (
+    <View key={report.id} style={styles.reportCard}>
+      <View style={styles.reportBody}>
+        <View style={styles.reportTagRow}>
+          <View style={styles.reportTag}>
+            <ThemedText
+              variant="labelSm"
+              color={colors.onSurfaceVariant}
+              style={{ fontSize: 11, textTransform: 'uppercase' }}
+            >
+              {report.tag}
+            </ThemedText>
+          </View>
+          {report.isUnlocked ? (
+            <View style={styles.unlockedChip}>
+              <Icon name="check-badge" size={14} color={colors.onTertiaryContainer} variant="solid" />
+              <ThemedText variant="labelSm" color={colors.onTertiaryContainer}>
+                Unlocked
+              </ThemedText>
+            </View>
+          ) : (
+            <Icon name={report.icon} size={20} color={colors.outline} />
+          )}
+        </View>
+        <ThemedText variant="titleMd" color={colors.primary}>
+          {report.title}
+        </ThemedText>
+        <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+          {report.description}
+        </ThemedText>
+        <ThemedText variant="labelSm" color={colors.secondary} style={{ marginTop: 8 }}>
+          {report.isUnlocked
+            ? 'Included in your intelligence assets'
+            : `${formatKsh(report.price)} · ${report.location}`}
+        </ThemedText>
+      </View>
+      <View style={styles.reportPreview}>
+        {report.previewImageUrl ? (
+          <Image source={{ uri: report.previewImageUrl }} style={StyleSheet.absoluteFill} />
+        ) : (
+          <View style={styles.blurredContent}>
+            <View style={[styles.shimmerBar, { width: '75%' }]} />
+            <View style={[styles.shimmerBar, { width: '50%' }]} />
+            <View style={[styles.shimmerBlock, { flex: 1 }]} />
+          </View>
+        )}
+        {!report.isUnlocked && (
+          <View style={styles.lockOverlay}>
+            <View style={styles.lockIconWrap}>
+              <Icon name="lock-closed" size={22} color={colors.secondary} variant="solid" />
+            </View>
+            <ThemedText variant="labelSm" color={colors.onSurface} style={{ marginVertical: 12 }}>
+              Premium Intelligence Data
+            </ThemedText>
+            <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+              Unlocking is handled at checkout.
+            </ThemedText>
+          </View>
+        )}
+      </View>
+    </View>
+  );
 
   return (
     <View style={styles.screen}>
-      <TopAppBar
-        leftIcon="map-pin"
-        title="SokoCircle"
-        actions={[{ icon: 'bell' }]}
-      />
+      <TopAppBar leftIcon="map-pin" title="SokoCircle" actions={[{ icon: 'bell' }]} />
 
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Market Intelligence selector */}
         <View style={styles.selectorCard}>
@@ -174,136 +256,160 @@ export default function GapMapScreen() {
           <View style={styles.selectRow}>
             <Select
               label="Category"
-              options={CATEGORIES}
+              options={categoryOptions}
               value={category}
-              onChange={setCategory}
+              onChange={setCategoryChoice}
+              disabled={!hasCategory}
             />
-            <Select
-              label="Location (County/Ward)"
-              options={LOCATIONS}
-              value={location}
-              onChange={setLocation}
-            />
+            <Select label="Location" options={LOCATION_OPTIONS} value={location} onChange={setLocationChoice} />
           </View>
 
-          <Pressable style={styles.analyzeBtn} onPress={handleAnalyze}>
+          <Pressable
+            style={[
+              styles.analyzeBtn,
+              (!hasCategory || analyticsLoading) && styles.analyzeBtnDisabled,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Analyze gap"
+            accessibilityState={{ disabled: !hasCategory || analyticsLoading, busy: analyticsLoading }}
+            disabled={!hasCategory || analyticsLoading}
+            onPress={reloadAnalytics}
+          >
             <Icon name="magnifying-glass" size={18} color={colors.onPrimary} />
             <ThemedText variant="labelSm" color={colors.onPrimary}>
-              Analyze Gap
+              {analyticsLoading ? 'Analyzing…' : 'Analyze Gap'}
             </ThemedText>
           </Pressable>
         </View>
 
-        {/* Analytics grid */}
-        <View style={{ gap: 16 }}>
-          {/* Opportunity Score */}
-          <View style={styles.oppCard}>
-            <View style={styles.oppHeader}>
-              <View style={{ gap: 2 }}>
-                <ThemedText variant="titleMd" color={colors.primary}>
-                  Opportunity Score
-                </ThemedText>
-                <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
-                  {category} in {location.split(',')[0]}
-                </ThemedText>
-              </View>
-              <View style={styles.strongBadge}>
-                <Icon name="check-badge" size={16} color={colors.onTertiaryContainer} variant="solid" />
-                <ThemedText variant="labelSm" color={colors.onTertiaryContainer}>
-                  Strong Opportunity
-                </ThemedText>
-              </View>
+        {/* Analytics */}
+        <View style={styles.oppCard}>
+          <View style={styles.oppHeader}>
+            <View style={{ gap: 2, flex: 1 }}>
+              <ThemedText variant="titleMd" color={colors.primary}>
+                Opportunity Score
+              </ThemedText>
+              <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+                {category || 'No category'} in {location}
+              </ThemedText>
             </View>
+          </View>
 
+          {!hasCategory ? (
+            <EmptyState
+              compact
+              icon="squares-2x2"
+              title="No categories published yet"
+              message="Opportunity scores appear once a category network is live."
+            />
+          ) : analyticsError ? (
+            <ErrorState
+              title="Couldn't load the analysis"
+              error={analyticsError}
+              onRetry={reloadAnalytics}
+            />
+          ) : !analytics ? (
+            <EmptyState
+              compact
+              icon="chart-bar"
+              title="No data for this selection yet"
+              message={`We have no demand or saturation figures for ${category} in ${location}. Try another location.`}
+            />
+          ) : (
             <View style={{ gap: 24 }}>
               <StatBar
                 label="Consumer Demand"
-                value={analytics?.demandLabel ?? '84% (High)'}
-                color={analytics?.demandColor ?? colors.primary}
+                value={analytics.demandLabel}
+                pct={analytics.consumerDemandPct}
+                color={analytics.demandColor}
               />
               <StatBar
                 label="Market Saturation"
-                value={analytics?.saturationLabel ?? '32% (Low)'}
-                color={analytics?.saturationColor ?? colors.secondary}
+                value={analytics.saturationLabel}
+                pct={analytics.marketSaturationPct}
+                color={analytics.saturationColor}
+              />
+            </View>
+          )}
+        </View>
+
+        {/* Break-even estimator */}
+        <View style={styles.estimatorCard}>
+          <ThemedText variant="titleMd" color={colors.primary}>
+            Break-even Estimator
+          </ThemedText>
+          <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+            Quick feasibility check
+          </ThemedText>
+
+          <View style={{ gap: 12, marginTop: 4 }}>
+            <View>
+              <ThemedText
+                variant="labelSm"
+                color={colors.onSurfaceVariant}
+                style={{ marginBottom: 4 }}
+              >
+                Initial Capital (KSh)
+              </ThemedText>
+              <TextInput
+                style={styles.estimatorInput}
+                value={capital}
+                onChangeText={(t) => setCapital(t.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+                placeholder="0"
+                placeholderTextColor={colors.outline}
+                accessibilityLabel="Initial capital in Kenyan shillings"
+              />
+            </View>
+            <View>
+              <ThemedText
+                variant="labelSm"
+                color={colors.onSurfaceVariant}
+                style={{ marginBottom: 4 }}
+              >
+                Avg. Monthly Overhead
+              </ThemedText>
+              <TextInput
+                style={styles.estimatorInput}
+                value={overhead}
+                onChangeText={(t) => setOverhead(t.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+                placeholder="0"
+                placeholderTextColor={colors.outline}
+                accessibilityLabel="Average monthly overhead in Kenyan shillings"
+              />
+            </View>
+            <View>
+              <ThemedText
+                variant="labelSm"
+                color={colors.onSurfaceVariant}
+                style={{ marginBottom: 4 }}
+              >
+                Est. Monthly Revenue
+              </ThemedText>
+              <TextInput
+                style={styles.estimatorInput}
+                value={revenue}
+                onChangeText={(t) => setRevenue(t.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+                placeholder="0"
+                placeholderTextColor={colors.outline}
+                accessibilityLabel="Estimated monthly revenue in Kenyan shillings"
               />
             </View>
           </View>
 
-          {/* Break-even estimator */}
-          <View style={styles.estimatorCard}>
+          <View style={styles.breakEvenBox}>
+            <ThemedText variant="labelSm" color={colors.onSurfaceVariant}>
+              Est. Break-even
+            </ThemedText>
             <ThemedText variant="titleMd" color={colors.primary}>
-              Break-even Estimator
+              {breakEvenMonths === null
+                ? 'Not profitable yet'
+                : breakEvenMonths === 1
+                  ? '1 Month'
+                  : `${breakEvenMonths} Months`}
             </ThemedText>
-            <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
-              Quick feasibility check
-            </ThemedText>
-
-            <View style={{ gap: 12, marginTop: 4 }}>
-              <View>
-                <ThemedText
-                  variant="labelSm"
-                  color={colors.onSurfaceVariant}
-                  style={{ marginBottom: 4 }}
-                >
-                  Initial Capital (KSh)
-                </ThemedText>
-                <TextInput
-                  style={styles.estimatorInput}
-                  value={capital}
-                  onChangeText={(t) => setCapital(t.replace(/[^0-9]/g, ''))}
-                  keyboardType="number-pad"
-                  placeholder="0"
-                  placeholderTextColor={colors.outline}
-                />
-              </View>
-              <View>
-                <ThemedText
-                  variant="labelSm"
-                  color={colors.onSurfaceVariant}
-                  style={{ marginBottom: 4 }}
-                >
-                  Avg. Monthly Overhead
-                </ThemedText>
-                <TextInput
-                  style={styles.estimatorInput}
-                  value={overhead}
-                  onChangeText={(t) => setOverhead(t.replace(/[^0-9]/g, ''))}
-                  keyboardType="number-pad"
-                  placeholder="0"
-                  placeholderTextColor={colors.outline}
-                />
-              </View>
-              <View>
-                <ThemedText
-                  variant="labelSm"
-                  color={colors.onSurfaceVariant}
-                  style={{ marginBottom: 4 }}
-                >
-                  Est. Monthly Revenue
-                </ThemedText>
-                <TextInput
-                  style={styles.estimatorInput}
-                  value={revenue}
-                  onChangeText={(t) => setRevenue(t.replace(/[^0-9]/g, ''))}
-                  keyboardType="number-pad"
-                  placeholder="0"
-                  placeholderTextColor={colors.outline}
-                />
-              </View>
-            </View>
-
-            <View style={styles.breakEvenBox}>
-              <ThemedText variant="labelSm" color={colors.onSurfaceVariant}>
-                Est. Break-even
-              </ThemedText>
-              <ThemedText variant="titleMd" color={colors.primary}>
-                {breakEvenMonths === null
-                  ? 'Not profitable yet'
-                  : breakEvenMonths === 1
-                    ? '1 Month'
-                    : `${breakEvenMonths} Months`}
-              </ThemedText>
-            </View>
           </View>
         </View>
 
@@ -313,81 +419,32 @@ export default function GapMapScreen() {
             Deep-Dive Gap Reports
           </ThemedText>
 
-          {reportList.map((report: GapReport) => (
-            <View key={report.id} style={styles.reportCard}>
-              <View style={styles.reportBody}>
-                <View style={styles.reportTagRow}>
-                  <View style={styles.reportTag}>
-                    <ThemedText
-                      variant="labelSm"
-                      color={colors.onSurfaceVariant}
-                      style={{ fontSize: 11, textTransform: 'uppercase' }}
-                    >
-                      {report.tag}
-                    </ThemedText>
-                  </View>
-                  <Icon name={report.icon} size={20} color={colors.outline} />
-                </View>
-                <ThemedText variant="titleMd" color={colors.primary}>
-                  {report.title}
-                </ThemedText>
-                <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
-                  {report.description}
-                </ThemedText>
-              </View>
-              <View style={styles.reportPreview}>
-                {report.previewImageUrl ? (
-                  <>
-                    <Image source={{ uri: report.previewImageUrl }} style={StyleSheet.absoluteFill} />
-                    <View style={[styles.lockOverlay, report.isUnlocked && { display: 'none' }]}>
-                      <View style={styles.lockIconWrap}>
-                        <Icon name="lock-closed" size={22} color={colors.secondary} variant="solid" />
-                      </View>
-                      <ThemedText variant="labelSm" color={colors.onSurface} style={{ marginVertical: 12 }}>
-                        Premium Intelligence Data
-                      </ThemedText>
-                      <Pressable style={styles.unlockBtn} onPress={() => handleUnlock(report)}>
-                        <ThemedText variant="labelSm" color={colors.onPrimary}>
-                          Pay KSh {report.price} to Unlock
-                        </ThemedText>
-                      </Pressable>
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    {/* blurred placeholder content */}
-                    <View style={styles.blurredContent}>
-                      <View style={[styles.shimmerBar, { width: '75%' }]} />
-                      <View style={[styles.shimmerBar, { width: '50%' }]} />
-                      <View style={[styles.shimmerBlock, { flex: 1 }]} />
-                    </View>
-                    <View style={styles.lockOverlay}>
-                      <View style={styles.lockIconWrap}>
-                        <Icon name="lock-closed" size={22} color={colors.secondary} variant="solid" />
-                      </View>
-                      <ThemedText variant="labelSm" color={colors.onSurface} style={{ marginVertical: 12 }}>
-                        Premium Intelligence Data
-                      </ThemedText>
-                      <Pressable style={styles.unlockBtn} onPress={() => handleUnlock(report)}>
-                        <ThemedText variant="labelSm" color={colors.onPrimary}>
-                          Pay KSh {report.price} to Unlock
-                        </ThemedText>
-                      </Pressable>
-                    </View>
-                  </>
-                )}
-                {report.isUnlocked && (
-                  <View style={styles.lockOverlay}>
-                    <Pressable style={styles.unlockBtn} onPress={() => handleUnlock(report)}>
-                      <ThemedText variant="labelSm" color={colors.onPrimary}>
-                        View Report
-                      </ThemedText>
-                    </Pressable>
-                  </View>
-                )}
-              </View>
-            </View>
-          ))}
+          {reportsLoading && (reports?.length ?? 0) === 0 ? (
+            <EmptyState
+              compact
+              icon="document-check"
+              title="Loading reports…"
+              message="Fetching published intelligence for this category."
+            />
+          ) : reportsError ? (
+            <ErrorState
+              title="Couldn't load reports"
+              error={reportsError}
+              onRetry={reloadReports}
+            />
+          ) : (reports?.length ?? 0) === 0 ? (
+            <EmptyState
+              icon="document-check"
+              title="No reports published yet"
+              message={
+                hasCategory
+                  ? `No deep-dive reports have been published for ${category}.`
+                  : 'Deep-dive reports appear once a category network is live.'
+              }
+            />
+          ) : (
+            reports!.map(renderReport)
+          )}
         </View>
       </ScrollView>
     </View>
@@ -412,6 +469,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
     backgroundColor: colors.surfaceContainerLowest,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
@@ -419,6 +477,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
+  selectInputDisabled: { opacity: 0.6 },
   selectMenu: {
     marginTop: 4,
     backgroundColor: colors.surfaceContainerLowest,
@@ -453,6 +512,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     height: 48,
   },
+  analyzeBtnDisabled: { opacity: 0.6 },
 
   oppCard: {
     backgroundColor: 'rgba(255,255,255,0.6)',
@@ -466,16 +526,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 24,
-  },
-  strongBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.tertiaryContainer,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
+    marginBottom: 16,
   },
   statRow: {
     flexDirection: 'row',
@@ -550,8 +601,17 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 4,
   },
+  unlockedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.tertiaryContainer,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
   reportPreview: {
-    height: 240,
+    height: 200,
     backgroundColor: colors.surfaceBright,
     alignItems: 'center',
     justifyContent: 'center',
@@ -593,13 +653,5 @@ const styles = StyleSheet.create({
     backgroundColor: rgba(colors.secondary, 0.1),
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  unlockBtn: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: radii.md,
-    alignSelf: 'stretch',
-    alignItems: 'center',
   },
 });

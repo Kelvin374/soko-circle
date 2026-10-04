@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
-import { IconName } from './Icon';
-import Icon from './Icon';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import Icon, { IconName } from './Icon';
 import ThemedText from './ThemedText';
 import { colors } from '../theme/colors';
-import { radii, shadows } from '../theme';
+import { shadows } from '../theme';
 import { rgba } from '../utils/color';
 import { UserProfile } from '../types';
-import { upgradeProfileTier } from '../lib/api';
+import { applyForMentor, MentorApplication } from '../lib/api';
+
+const POSTS_NEEDED = 10;
+const UPVOTES_NEEDED = 50;
 
 type Criterion = {
   key: string;
@@ -16,11 +18,9 @@ type Criterion = {
   todo: string;
   met: (p: UserProfile) => boolean;
   metText: (p: UserProfile) => string;
-  guide: () => void;
+  /** Explains exactly what to do. Rendered inline, never as an alert. */
+  guide: string;
 };
-
-const POSTS_NEEDED = 10;
-const UPVOTES_NEEDED = 50;
 
 const CRITERIA: Criterion[] = [
   {
@@ -30,11 +30,7 @@ const CRITERIA: Criterion[] = [
     todo: `Publish ${POSTS_NEEDED}+ community posts from the Home feed.`,
     met: (p) => p.communityPosts >= POSTS_NEEDED,
     metText: (p) => `${p.communityPosts} community posts`,
-    guide: () =>
-      Alert.alert(
-        'Build Activity',
-        `Publish ${POSTS_NEEDED}+ quality posts from the Home feed to unlock this criterion. You currently have fewer than ${POSTS_NEEDED}.`,
-      ),
+    guide: `Open the Home tab, tap the compose button and publish ${POSTS_NEEDED} posts. Your counter is maintained automatically from your posts.`,
   },
   {
     key: 'reputation',
@@ -43,11 +39,7 @@ const CRITERIA: Criterion[] = [
     todo: `Reach ${UPVOTES_NEEDED}+ helpful upvotes on your contributions.`,
     met: (p) => p.helpfulUpvotes >= UPVOTES_NEEDED,
     metText: (p) => `${p.helpfulUpvotes} helpful upvotes`,
-    guide: () =>
-      Alert.alert(
-        'Earn Reputation',
-        `Gain ${UPVOTES_NEEDED}+ helpful upvotes from the community by sharing actionable trade insights.`,
-      ),
+    guide: `Upvotes are counted when another trader finds your post helpful, so publish actionable trade insights: prices, suppliers and negotiation tactics. ${UPVOTES_NEEDED} upvotes from other traders unlocks this.`,
   },
   {
     key: 'profile',
@@ -56,53 +48,46 @@ const CRITERIA: Criterion[] = [
     todo: 'Keep your business type and county on file.',
     met: (p) => Boolean(p.businessType && p.location),
     metText: () => 'Business details on file',
-    guide: () =>
-      Alert.alert(
-        'Verify Your Business',
-        'Complete your business profile (business type + county) during onboarding so we can verify you.',
-      ),
+    guide: 'Add your business type and county from Account → Edit Profile so reviewers can identify your business.',
   },
 ];
 
 type Props = {
   profile: UserProfile;
-  onUpgraded?: () => void;
+  /** Existing application, if any. `null` means they have never applied. */
+  application: MentorApplication | null;
+  /** Called after a successful submission so the parent can refetch. */
+  onApplied: () => void;
 };
 
-export default function CredibilityLadder({ profile, onUpgraded }: Props) {
-  const [applying, setApplying] = useState(false);
-  const applied = profile.tierName === 'Verified Mentor';
+export default function CredibilityLadder({ profile, application, onApplied }: Props) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const criteria = CRITERIA;
-  const metCount = criteria.filter((c) => c.met(profile)).length;
-  const total = criteria.length;
+  const isMentor = profile.tier === 'mentor';
+  const pending = application?.status === 'pending';
+  const rejected = application?.status === 'rejected';
+
+  const metCount = CRITERIA.filter((c) => c.met(profile)).length;
+  const total = CRITERIA.length;
   const pct = Math.round((metCount / total) * 100);
-  const eligible = metCount === total;
-  const unmet = criteria.filter((c) => !c.met(profile));
+  const eligible = metCount === total && !isMentor && !pending;
+  const unmet = CRITERIA.filter((c) => !c.met(profile));
 
-  const doApply = async () => {
-    setApplying(true);
+  const handleApply = async () => {
+    setSubmitting(true);
+    setFormError(null);
     try {
-      await upgradeProfileTier();
-      Alert.alert('Application Submitted', 'Welcome aboard! Your profile now shows Verified Mentor.');
-      onUpgraded?.();
+      await applyForMentor();
+      onApplied();
     } catch (e) {
-      Alert.alert(
-        'Could Not Apply',
-        e instanceof Error && e.message === 'sign-in-required'
-          ? 'Sign in to submit your mentor application.'
-          : 'We could not update your tier right now. Please try again.',
+      setFormError(
+        e instanceof Error ? e.message : 'We could not submit your application. Please try again.',
       );
     } finally {
-      setApplying(false);
+      setSubmitting(false);
     }
-  };
-
-  const handleApply = () => {
-    Alert.alert('Confirm Application', "You've met every criterion. Submit your Verified Mentor application?", [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Apply', onPress: doApply },
-    ]);
   };
 
   return (
@@ -116,10 +101,10 @@ export default function CredibilityLadder({ profile, onUpgraded }: Props) {
             </ThemedText>
           </View>
           <ThemedText variant="titleMd" color="#fff" style={styles.title}>
-            {applied ? 'You are a Verified Mentor' : 'Upgrade to Verified Mentor'}
+            {isMentor ? 'You are a Verified Mentor' : 'Apply to become a Verified Mentor'}
           </ThemedText>
           <ThemedText variant="bodyMd" color="rgba(255,255,255,0.75)" style={styles.subtitle}>
-            Unlock paid 1:1 direct consultations and earn KES 1,500+ per consultation session.
+            Mentor traders unlock paid 1:1 consultations and set their own session price.
           </ThemedText>
         </View>
         <View style={styles.iconWrap}>
@@ -127,91 +112,149 @@ export default function CredibilityLadder({ profile, onUpgraded }: Props) {
         </View>
       </View>
 
-      {applied ? (
-        <Pressable
-          style={styles.verifiedRow}
-          onPress={() => Alert.alert('Verified Mentor', 'Your mentor badges, consultation slot and pricing are active. Viewable across SokoCircle.')}
-        >
+      {isMentor ? (
+        <View style={styles.verifiedRow}>
           <Icon name="check-badge" size={18} color={colors.gold} variant="solid" />
           <ThemedText variant="labelSm" color="rgba(255,255,255,0.9)" style={{ fontWeight: '700' }}>
-            Mentor status active — you can now be booked for 1:1 sessions.
+            Mentor status is active — traders can now book 1:1 sessions with you.
           </ThemedText>
-        </Pressable>
+        </View>
       ) : (
         <>
           <View style={styles.progressRow}>
-            <ThemedText variant="labelSm" color="rgba(255,255,255,0.8)" style={{ fontWeight: '500' }}>
+            <ThemedText
+              variant="labelSm"
+              color="rgba(255,255,255,0.8)"
+              style={{ fontWeight: '500' }}
+            >
               {metCount} of {total} criteria met
             </ThemedText>
-            <ThemedText variant="labelSm" color={eligible ? colors.gold : 'rgba(255,255,255,0.6)'} style={{ fontWeight: '700' }}>
-              {eligible ? 'Ready to apply' : `${total - metCount} remaining`}
+            <ThemedText
+              variant="labelSm"
+              color={pending ? colors.gold : 'rgba(255,255,255,0.6)'}
+              style={{ fontWeight: '700' }}
+            >
+              {pending
+                ? 'Under review'
+                : eligible
+                  ? 'Ready to apply'
+                  : `${total - metCount} remaining`}
             </ThemedText>
           </View>
           <View style={styles.track}>
             <View style={[styles.fill, { width: `${pct}%` }]} />
           </View>
 
+          {rejected && (
+            <View style={styles.noteRow}>
+              <Icon name="exclamation-triangle" size={16} color={colors.secondaryContainer} />
+              <ThemedText variant="labelSm" color="rgba(255,255,255,0.9)" style={{ flex: 1 }}>
+                {application?.review_note
+                  ? `Previous application declined: ${application.review_note}`
+                  : 'Your previous application was declined. Meet every criterion and apply again.'}
+              </ThemedText>
+            </View>
+          )}
+
           <View style={styles.criteria}>
-            {criteria.map((c) => {
+            {CRITERIA.map((c) => {
               const met = c.met(profile);
+              const open = expanded === c.key;
               return (
-                <Pressable
-                  key={c.key}
-                  disabled={met}
-                  onPress={c.guide}
-                  style={styles.criterionRow}
-                >
-                  <View style={[styles.criterionIcon, met && styles.criterionIconMet]}>
-                    <Icon
-                      name={met ? 'check-circle' : c.icon}
-                      size={18}
-                      color={met ? colors.success : 'rgba(255,255,255,0.6)'}
-                      variant={met ? 'solid' : 'outline'}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <ThemedText variant="labelSm" color="#fff" style={{ fontWeight: '600' }}>
-                      {c.title}
-                    </ThemedText>
-                    <ThemedText variant="labelSm" color={met ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.5)'} style={{ fontSize: 11, marginTop: 2 }}>
-                      {met ? c.metText(profile) : c.todo}
-                    </ThemedText>
-                  </View>
-                  {!met && (
-                    <View style={styles.actionChip}>
-                      <ThemedText variant="labelSm" color={colors.gold} style={{ fontSize: 11, fontWeight: '700' }}>
-                        Do This
+                <View key={c.key} style={styles.criterionWrap}>
+                  <Pressable
+                    onPress={() => setExpanded(open ? null : c.key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: open }}
+                    accessibilityLabel={c.title}
+                    style={styles.criterionRow}
+                  >
+                    <View style={[styles.criterionIcon, met && styles.criterionIconMet]}>
+                      <Icon
+                        name={met ? 'check-circle' : c.icon}
+                        size={18}
+                        color={met ? colors.success : 'rgba(255,255,255,0.6)'}
+                        variant={met ? 'solid' : 'outline'}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText variant="labelSm" color="#fff" style={{ fontWeight: '600' }}>
+                        {c.title}
+                      </ThemedText>
+                      <ThemedText
+                        variant="labelSm"
+                        color={met ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.5)'}
+                        style={{ fontSize: 11, marginTop: 2 }}
+                      >
+                        {met ? c.metText(profile) : c.todo}
                       </ThemedText>
                     </View>
+                    {!met && (
+                      <View style={styles.actionChip}>
+                        <ThemedText
+                          variant="labelSm"
+                          color={colors.gold}
+                          style={{ fontSize: 11, fontWeight: '700' }}
+                        >
+                          How?
+                        </ThemedText>
+                      </View>
+                    )}
+                  </Pressable>
+                  {open && !met && (
+                    <ThemedText variant="labelSm" color="rgba(255,255,255,0.7)" style={styles.guide}>
+                      {c.guide}
+                    </ThemedText>
                   )}
-                </Pressable>
+                </View>
               );
             })}
           </View>
 
+          {formError && (
+            <View style={styles.noteRow}>
+              <Icon name="exclamation-triangle" size={16} color={colors.errorContainer} />
+              <ThemedText variant="labelSm" color={colors.errorContainer} style={{ flex: 1 }}>
+                {formError}
+              </ThemedText>
+            </View>
+          )}
+
           <View style={styles.footer}>
             <View style={{ flex: 1 }}>
-              <ThemedText variant="labelSm" color="rgba(255,255,255,0.8)" style={{ fontSize: 12, fontWeight: '500' }}>
-                {eligible
-                  ? 'You are eligible to apply.'
-                  : `Unlock the remaining ${unmet.length} ${
-                      unmet.length === 1 ? 'criterion' : 'criteria'
-                    } to apply.`}
+              <ThemedText
+                variant="labelSm"
+                color="rgba(255,255,255,0.8)"
+                style={{ fontSize: 12, fontWeight: '500' }}
+              >
+                {pending
+                  ? 'Our team is reviewing your application.'
+                  : eligible
+                    ? 'You are eligible to apply.'
+                    : `Unlock the remaining ${unmet.length} ${
+                        unmet.length === 1 ? 'criterion' : 'criteria'
+                      } to apply.`}
               </ThemedText>
             </View>
             <Pressable
-              disabled={!eligible || applying}
-              onPress={handleApply}
+              disabled={!eligible || submitting}
+              onPress={() => void handleApply()}
+              accessibilityRole="button"
+              accessibilityLabel="Apply to become a Verified Mentor"
               style={[styles.applyBtn, !eligible && styles.applyBtnDisabled]}
             >
-              {applying ? (
+              {submitting ? (
                 <ActivityIndicator size="small" color={colors.primary} />
               ) : (
                 <>
-                  <ThemedText variant="labelSm" color={colors.primary} style={{ fontWeight: '700' }}>
-                    Apply Now
+                  <ThemedText
+                    variant="labelSm"
+                    color={eligible ? colors.primary : 'rgba(255,255,255,0.6)'}
+                    style={{ fontWeight: '700' }}
+                  >
+                    {pending ? 'Applied' : 'Apply Now'}
                   </ThemedText>
-                  <Icon name="arrow-right" size={16} color={colors.primary} />
+                  {eligible && <Icon name="arrow-right" size={16} color={colors.primary} />}
                 </>
               )}
             </Pressable>
@@ -280,6 +323,9 @@ const styles = StyleSheet.create({
   criteria: {
     gap: 2,
   },
+  criterionWrap: {
+    borderRadius: 10,
+  },
   criterionRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -287,6 +333,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 4,
     borderRadius: 10,
+    minHeight: 44,
   },
   criterionIcon: {
     width: 32,
@@ -299,11 +346,25 @@ const styles = StyleSheet.create({
   criterionIconMet: {
     backgroundColor: rgba(colors.success, 0.18),
   },
+  guide: {
+    fontSize: 11,
+    paddingHorizontal: 4,
+    paddingBottom: 10,
+    lineHeight: 16,
+  },
   actionChip: {
     backgroundColor: 'rgba(255,255,255,0.1)',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 999,
+  },
+  noteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 12,
   },
   verifiedRow: {
     flexDirection: 'row',
@@ -331,6 +392,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     minWidth: 112,
+    minHeight: 44,
     borderRadius: 8,
   },
   applyBtnDisabled: {

@@ -1,60 +1,28 @@
-import React from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
+import React, { useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ThemedText from './ThemedText';
-import Icon, { IconName } from './Icon';
+import Icon from './Icon';
+import ErrorState from './ErrorState';
+import EmptyState from './EmptyState';
 import { colors } from '../theme/colors';
 import { radii } from '../theme';
 import { rgba } from '../utils/color';
-
-type NotificationItem = {
-  id: string;
-  icon: IconName;
-  title: string;
-  body: string;
-  timeAgo: string;
-  unread?: boolean;
-};
-
-const NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: 'notif-1',
-    icon: 'hand-thumb-up',
-    title: 'Your post was upvoted',
-    body: 'Wanjiru K. and 12 others found your supplier guide helpful.',
-    timeAgo: '5m ago',
-    unread: true,
-  },
-  {
-    id: 'notif-2',
-    icon: 'chat-bubble-left-right',
-    title: 'New comment on your post',
-    body: 'Omondi A.: "Ksh 800 per unit for grade A? That is a good price..."',
-    timeAgo: '1h ago',
-    unread: true,
-  },
-  {
-    id: 'notif-3',
-    icon: 'check-badge',
-    title: 'Verification approved',
-    body: 'Your business KYC documents passed. Tier 1 badge is now live.',
-    timeAgo: '1d ago',
-  },
-  {
-    id: 'notif-4',
-    icon: 'credit-card',
-    title: 'M-Pesa payment received',
-    body: 'KES 500.00 received for "Target Audience Spending Power" report.',
-    timeAgo: '2d ago',
-  },
-  {
-    id: 'notif-5',
-    icon: 'sparkles',
-    title: 'New mentor available',
-    body: 'John M. (Electronics Importer) is now taking bookings.',
-    timeAgo: '3d ago',
-  },
-];
+import {
+  fetchNotifications,
+  markNotificationsRead,
+  notificationIcon,
+  type AppNotification,
+} from '../lib/api';
+import { useAsyncData } from '../hooks/useAsyncData';
 
 type Props = {
   visible: boolean;
@@ -63,8 +31,33 @@ type Props = {
 
 export default function NotificationSheet({ visible, onClose }: Props) {
   const insets = useSafeAreaInsets();
+  const [marking, setMarking] = useState(false);
+  const [actionError, setActionError] = useState<Error | null>(null);
+  const { data, loading, error, reload } = useAsyncData<AppNotification[]>(
+    async () => (visible ? await fetchNotifications() : []),
+    [visible],
+  );
+
+  const items = data ?? [];
+  const displayError = actionError ?? error;
+
+  const handleMarkAllRead = async () => {
+    setMarking(true);
+    setActionError(null);
+    try {
+      await markNotificationsRead();
+      reload();
+    } catch (e) {
+      setActionError(e instanceof Error ? e : new Error(String(e)));
+    } finally {
+      setMarking(false);
+    }
+  };
+
+  const hasUnread = items.some((n) => !n.read_at);
+
   return (
-    <Modal visible={visible} animationType="slide" transparent>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
         <View style={styles.handle} />
@@ -73,41 +66,99 @@ export default function NotificationSheet({ visible, onClose }: Props) {
           <ThemedText variant="headline" color={colors.primary} style={{ fontSize: 18 }}>
             Notifications
           </ThemedText>
-          <Pressable onPress={onClose} hitSlop={8} style={styles.closeBtn}>
-            <Icon name="chevron-down" size={22} color={colors.outline} />
-          </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            {hasUnread && (
+              <Pressable
+                onPress={() => void handleMarkAllRead()}
+                disabled={marking}
+                accessibilityRole="button"
+                accessibilityLabel="Mark all notifications as read"
+                hitSlop={8}
+                style={styles.markAllBtn}
+              >
+                {marking ? (
+                  <ActivityIndicator size="small" color={colors.secondary} />
+                ) : (
+                  <ThemedText variant="labelSm" color={colors.secondary} style={{ fontWeight: '700' }}>
+                    Mark all read
+                  </ThemedText>
+                )}
+              </Pressable>
+            )}
+            <Pressable onPress={onClose} hitSlop={8} style={styles.closeBtn}>
+              <Icon name="chevron-down" size={22} color={colors.outline} />
+            </Pressable>
+          </View>
         </View>
 
-        <FlatList
-          data={NOTIFICATIONS}
-          keyExtractor={(n) => n.id}
-          contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
-          renderItem={({ item }) => (
-            <View
-              style={[
-                styles.row,
-                item.unread && styles.rowUnread,
-              ]}
-            >
-              <View style={[styles.iconWrap, item.unread && styles.iconUnread]}>
-                <Icon name={item.icon} size={18} color={item.unread ? colors.onPrimary : colors.secondary} variant="solid" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <ThemedText variant="labelSm" color={colors.primary} style={{ fontSize: 13, flex: 1 }}>
-                    {item.title}
-                  </ThemedText>
-                  <ThemedText variant="labelSm" color={colors.outline} style={{ fontSize: 11, marginLeft: 8 }}>
-                    {item.timeAgo}
-                  </ThemedText>
+        {loading && items.length === 0 ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : displayError ? (
+          <ErrorState
+            compact
+            title="Couldn't load notifications"
+            error={displayError}
+            onRetry={reload}
+          />
+        ) : items.length === 0 ? (
+          <EmptyState
+            compact
+            icon="bell"
+            title="No notifications yet"
+            message="Likes, comments and account updates will show up here."
+          />
+        ) : (
+          <FlatList
+            data={items}
+            keyExtractor={(n) => n.id}
+            contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 8 }}
+            refreshControl={
+              <RefreshControl refreshing={loading} onRefresh={reload} tintColor={colors.primary} />
+            }
+            renderItem={({ item }) => {
+              const unread = !item.read_at;
+              return (
+                <View style={[styles.row, unread && styles.rowUnread]}>
+                  <View style={[styles.iconWrap, unread && styles.iconUnread]}>
+                    <Icon
+                      name={notificationIcon(item.kind)}
+                      size={18}
+                      color={unread ? colors.onPrimary : colors.secondary}
+                      variant="solid"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <ThemedText
+                        variant="labelSm"
+                        color={colors.primary}
+                        style={{ fontSize: 13, flex: 1 }}
+                      >
+                        {item.title}
+                      </ThemedText>
+                      <ThemedText
+                        variant="labelSm"
+                        color={colors.outline}
+                        style={{ fontSize: 11, marginLeft: 8 }}
+                      >
+                        {item.timeAgo}
+                      </ThemedText>
+                    </View>
+                    <ThemedText
+                      variant="bodyMd"
+                      color={colors.onSurfaceVariant}
+                      style={{ fontSize: 13, marginTop: 2 }}
+                    >
+                      {item.body}
+                    </ThemedText>
+                  </View>
                 </View>
-                <ThemedText variant="bodyMd" color={colors.onSurfaceVariant} style={{ fontSize: 13, marginTop: 2 }}>
-                  {item.body}
-                </ThemedText>
-              </View>
-            </View>
-          )}
-        />
+              );
+            }}
+          />
+        )}
       </View>
     </Modal>
   );
@@ -148,6 +199,16 @@ const styles = StyleSheet.create({
   },
   closeBtn: {
     padding: 4,
+  },
+  markAllBtn: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  centered: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
   },
   row: {
     flexDirection: 'row',

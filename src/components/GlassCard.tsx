@@ -1,7 +1,5 @@
-import { StyleSheet, View, ViewProps } from 'react-native';
-import { colors } from '../theme/colors';
+import { View, ViewProps } from 'react-native';
 import { radii, shadows } from '../theme';
-import { rgba } from '../utils/color';
 
 export default function GlassCard({ style, children, ...rest }: ViewProps) {
   return (

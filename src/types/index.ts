@@ -7,12 +7,20 @@ export type FeedPost = {
   isVerified: boolean;
   isMentor: boolean;
   timeAgo: string;
+  /** Raw ISO timestamp so relative labels can be refreshed without a refetch. */
+  createdAt: string;
   category: string;
   title: string;
   body: string;
   imageUrl: string | null;
   likes: number;
   comments: number;
+};
+
+/** One page of the feed. `nextOffset` is `null` when the end has been reached. */
+export type PostsPage = {
+  items: FeedPost[];
+  nextOffset: number | null;
 };
 
 export type ExploreCategory = {
@@ -45,6 +53,7 @@ export type Supplier = {
   image?: string;
   featured?: boolean;
   location?: string;
+  verified: boolean;
 };
 
 export type GapReport = {
@@ -71,18 +80,25 @@ export type GapAnalytics = {
   saturationColor: string;
 };
 
+/**
+ * Everything shown on the Account tab. Nullable fields stay nullable — the UI
+ * renders "Not set yet" rather than inventing a business type or location.
+ */
 export type UserProfile = {
   id: string;
   fullName: string;
   avatarUrl: string | null;
-  businessType: string;
-  location: string;
+  businessType: string | null;
+  location: string | null;
+  bio: string | null;
+  phone: string | null;
+  tier: string;
   tierName: string;
   communityPosts: number;
   helpfulUpvotes: number;
   walletBalance: number;
-  upvotedVerified: boolean;
-  email: string;
+  email: string | null;
+  createdAt: string;
 };
 
 export type ProfileMetrics = {
@@ -96,4 +112,5 @@ export type PostComment = {
   authorName: string;
   body: string;
   createdAt: string;
+  isMine: boolean;
 };

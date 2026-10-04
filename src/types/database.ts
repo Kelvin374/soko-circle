@@ -12,6 +12,8 @@ export type Database = {
           business_type: string | null;
           location: string | null;
           bio: string | null;
+          /** Added in 0004. */
+          phone: string | null;
           community_posts: number;
           helpful_upvotes: number;
           wallet_balance: number;
@@ -26,6 +28,7 @@ export type Database = {
           business_type?: string | null;
           location?: string | null;
           bio?: string | null;
+          phone?: string | null;
           community_posts?: number;
           helpful_upvotes?: number;
           wallet_balance?: number;
@@ -40,6 +43,7 @@ export type Database = {
           business_type: string | null;
           location: string | null;
           bio: string | null;
+          phone: string | null;
           community_posts: number;
           helpful_upvotes: number;
           wallet_balance: number;
@@ -348,6 +352,83 @@ export type Database = {
         }>;
         Relationships: [];
       };
+      /** Added in 0006. Users file applications; only service_role reviews them. */
+      mentor_applications: {
+        Row: {
+          id: string;
+          profile_id: string;
+          status: string;
+          community_posts: number;
+          helpful_upvotes: number;
+          business_type: string | null;
+          location: string | null;
+          review_note: string | null;
+          reviewed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          profile_id: string;
+          status?: string;
+          community_posts?: number;
+          helpful_upvotes?: number;
+          business_type?: string | null;
+          location?: string | null;
+          review_note?: string | null;
+          reviewed_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<{
+          id: string;
+          profile_id: string;
+          status: string;
+          community_posts: number;
+          helpful_upvotes: number;
+          business_type: string | null;
+          location: string | null;
+          review_note: string | null;
+          reviewed_at: string | null;
+          created_at: string;
+        }>;
+        Relationships: [];
+      };
+      /** Added in 0007. Written by triggers only; clients read + mark read. */
+      notifications: {
+        Row: {
+          id: string;
+          profile_id: string;
+          actor_profile_id: string | null;
+          kind: string;
+          title: string;
+          body: string;
+          post_id: string | null;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          profile_id: string;
+          actor_profile_id?: string | null;
+          kind: string;
+          title: string;
+          body: string;
+          post_id?: string | null;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<{
+          id: string;
+          profile_id: string;
+          actor_profile_id: string | null;
+          kind: string;
+          title: string;
+          body: string;
+          post_id: string | null;
+          read_at: string | null;
+          created_at: string;
+        }>;
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -360,6 +441,44 @@ export type Database = {
           p_full_name: string;
         };
         Returns: undefined;
+      };
+      /** Added in 0004. Resolves the caller's `profiles.id` from `auth.uid()`. */
+      current_profile_id: {
+        Args: Record<PropertyKey, never>;
+        Returns: string;
+      };
+      /** Added in 0004. Server-validated post creation. */
+      create_post: {
+        Args: {
+          p_title: string;
+          p_body: string;
+          p_category?: string | null;
+          p_image_url?: string | null;
+        };
+        Returns: Database['public']['Tables']['posts']['Row'];
+      };
+      /** Added in 0004. Server-validated comment creation. */
+      create_comment: {
+        Args: {
+          p_post_id: string;
+          p_body: string;
+        };
+        Returns: Database['public']['Tables']['post_comments']['Row'];
+      };
+      /** Added in 0006. Files a mentor application after re-checking criteria. */
+      apply_for_mentor: {
+        Args: Record<PropertyKey, never>;
+        Returns: Database['public']['Tables']['mentor_applications']['Row'];
+      };
+      /** Added in 0007. Marks notifications read; omit ids to mark all. */
+      mark_notifications_read: {
+        Args: { p_ids?: string[] | null };
+        Returns: number;
+      };
+      /** Added in 0007. Index-backed unread count for the tab badge. */
+      unread_notification_count: {
+        Args: Record<PropertyKey, never>;
+        Returns: number;
       };
     };
     Enums: {

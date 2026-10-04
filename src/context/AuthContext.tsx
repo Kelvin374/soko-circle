@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { RESET_PASSWORD_REDIRECT } from '../lib/resetPassword';
 
 export type ResetPasswordResult = { ok: true } | { ok: false; error: string };
 
@@ -38,8 +39,6 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
-
-const RESET_PASSWORD_REDIRECT = 'sokocircle://reset-password';
 
 function rateLimitMessage(operation: string): string {
   return (
@@ -83,13 +82,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!userId) {
-      setOnboardingChecked(false);
-      setNeedsOnboarding(false);
-      return;
-    }
+    if (!userId) return;
     let active = true;
-    setOnboardingChecked(false);
     const checkOnboarding = async () => {
       try {
         const { data } = await supabase
@@ -114,6 +108,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [userId]);
 
+  const onboardingResolved = onboardingChecked && !!userId;
+  const needsBusinessType = !!userId && onboardingResolved && needsOnboarding;
+
   const signIn = useCallback(async (email: string, password: string): Promise<string | null> => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error) return null;
@@ -137,14 +134,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (data.session) {
-        try {
-          await supabase.from('profiles').insert({
-            auth_uid: data.user!.id,
-            full_name: fullName,
-          });
-        } catch {
-          // profile row is created lazily on sign-in when unavailable
-        }
+        // The `handle_new_user` trigger in migration 0004 creates the profile
+        // row, so there is nothing left for the client to do here.
         return { error: null, needsEmailConfirmation: false };
       }
 
@@ -156,30 +147,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const completeOnboarding = useCallback(
     async (input: OnboardingInput): Promise<string | null> => {
       if (!session?.user?.id) return 'You need to be signed in to complete this step.';
+      const fullName = input.fullName.trim();
+      if (fullName.length === 0) return 'Enter the name traders will see on your posts.';
       try {
+        // `upsert_my_profile` is SECURITY DEFINER (0002) and is the only writer the
+        // client may use: 0004 revokes INSERT and restricts UPDATE on `profiles`.
         const { error } = await supabase.rpc('upsert_my_profile', {
           p_business_type: input.businessType,
           p_location: input.location,
-          p_full_name: input.fullName.trim(),
+          p_full_name: fullName,
         });
         if (error) throw error;
-      } catch {
-        try {
-          const { error } = await supabase.from('profiles').upsert(
-            {
-              auth_uid: session.user.id,
-              full_name: input.fullName.trim(),
-              business_type: input.businessType,
-              location: input.location,
-            },
-            { onConflict: 'auth_uid' },
-          );
-          if (error) return `Could not save your business details: ${error.message}`;
-        } catch (e) {
-          return `Could not save your business details: ${
-            e instanceof Error ? e.message : String(e)
-          }`;
-        }
+      } catch (e) {
+        return `Could not save your business details: ${
+          e instanceof Error ? e.message : String(e)
+        }`;
       }
       setNeedsOnboarding(false);
       setOnboardingChecked(true);
@@ -212,8 +194,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: session?.user ?? null,
       session,
       initializing,
-      onboardingChecked,
-      needsOnboarding,
+      onboardingChecked: onboardingResolved,
+      needsOnboarding: needsBusinessType,
       fullName,
       email,
       completeOnboarding,
@@ -225,8 +207,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [
       session,
       initializing,
-      onboardingChecked,
-      needsOnboarding,
+      onboardingResolved,
+      needsBusinessType,
       fullName,
       email,
       completeOnboarding,

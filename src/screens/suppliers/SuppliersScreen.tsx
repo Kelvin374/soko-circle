@@ -1,36 +1,53 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   Image,
   Pressable,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import TopAppBar from '../../components/TopAppBar';
 import ThemedText from '../../components/ThemedText';
 import Icon, { IconName } from '../../components/Icon';
 import { colors } from '../../theme/colors';
 import { radii, shadows, spacing } from '../../theme';
 import { rgba } from '../../utils/color';
-import { useSuppliers } from '../../hooks/useData';
+import ErrorState from '../../components/ErrorState';
+import EmptyState from '../../components/EmptyState';
+import { useCategories, useSuppliers } from '../../hooks/useData';
+import { COUNTY_NAMES } from '../../lib/locations';
+import type { RootStackParamList, TabParamList } from '../../navigation/types';
 
-const CATEGORIES = ['All Verified', 'Agriculture', 'Textiles', 'Tech Hardware', 'FMCG Food'];
-const COUNTIES = ['All Counties', 'Nairobi', 'Nakuru', 'Mombasa', 'Kiambu'];
-const SORTS = ['Featured', 'Rating: High to Low', 'Rating: Low to High'];
+const ALL_CATEGORIES = 'All Categories';
+const ALL_COUNTIES = 'All Counties';
+const SORTS = ['Featured', 'Rating: High to Low', 'Rating: Low to Low'] as const;
+type Sort = (typeof SORTS)[number];
+
+type Nav = CompositeNavigationProp<
+  BottomTabNavigationProp<TabParamList>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 type ChipProps = {
   label: string;
   icon?: IconName;
   active?: boolean;
+  accessibilityLabel?: string;
   onPress?: () => void;
 };
 
-function Chip({ label, icon, active, onPress }: ChipProps) {
+function Chip({ label, icon, active, accessibilityLabel, onPress }: ChipProps) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ selected: !!active }}
       style={[styles.chip, active && styles.chipActive]}
     >
       {icon && (
@@ -72,16 +89,6 @@ function SupplierCard({
   price,
   image,
 }: SupplierCardProps) {
-  const handleContact = () => {
-    Alert.alert('Contact Supplier', `Send an inquiry to ${name}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Send',
-        onPress: () => Alert.alert('Inquiry Sent', `Your inquiry to ${name} was sent. They typically reply within 24 hours.`),
-      },
-    ]);
-  };
-
   return (
     <View style={styles.supplierCard}>
       <View style={styles.supplierMedia}>
@@ -146,9 +153,6 @@ function SupplierCard({
           <ThemedText variant="labelSm" color={colors.primary}>
             {price}
           </ThemedText>
-          <Pressable style={styles.sendBtn} hitSlop={8} onPress={handleContact}>
-            <Icon name="paper-airplane" size={20} color={colors.primary} variant="solid" />
-          </Pressable>
         </View>
       </View>
     </View>
@@ -156,60 +160,108 @@ function SupplierCard({
 }
 
 export default function SuppliersScreen() {
-  const [category, setCategory] = useState(CATEGORIES[0]);
-  const [county, setCounty] = useState(COUNTIES[0]);
-  const [sort, setSort] = useState(SORTS[0]);
+  const navigation = useNavigation<Nav>();
+  const { data: categories } = useCategories();
+  const [category, setCategory] = useState(ALL_CATEGORIES);
+  const [county, setCounty] = useState(ALL_COUNTIES);
+  const [sort, setSort] = useState<Sort>('Featured');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const { data: suppliersData } = useSuppliers();
-  const featured = suppliersData?.featured;
+
+  const categoryOptions = useMemo(
+    () => [ALL_CATEGORIES, ...(categories ?? []).map((c) => c.title)],
+    [categories],
+  );
+  const countyOptions = useMemo(() => [ALL_COUNTIES, ...COUNTY_NAMES], []);
+
+  const {
+    data: suppliersData,
+    loading,
+    error,
+    reload,
+  } = useSuppliers({
+    category: category === ALL_CATEGORIES ? null : category,
+    county: county === ALL_COUNTIES ? null : county,
+  });
+
+  const featured = suppliersData?.featured ?? null;
   const list = useMemo(() => {
-    let items = suppliersData?.list ?? [];
-    if (category !== CATEGORIES[0]) {
-      items = items.filter((s) => s.category === category);
-    }
-    if (county !== COUNTIES[0]) {
-      items = items.filter((s) => s.location === county);
-    }
+    const items = suppliersData?.list ?? [];
     if (sort === 'Rating: High to Low') {
-      items = [...items].sort((a, b) => parseFloat(b.rating ?? '0') - parseFloat(a.rating ?? '0'));
-    } else if (sort === 'Rating: Low to High') {
-      items = [...items].sort((a, b) => parseFloat(a.rating ?? '0') - parseFloat(b.rating ?? '0'));
-    } else {
-      items = [...items].sort((a, b) => Number(b.featured ?? false) - Number(a.featured ?? false));
+      return [...items].sort(
+        (a, b) => (parseFloat(b.rating ?? '') || 0) - (parseFloat(a.rating ?? '') || 0),
+      );
     }
-    return items;
-  }, [suppliersData, category, county, sort]);
+    if (sort === 'Rating: Low to Low') {
+      return [...items].sort(
+        (a, b) => (parseFloat(a.rating ?? '') || 0) - (parseFloat(b.rating ?? '') || 0),
+      );
+    }
+    return [...items].sort(
+      (a, b) => Number(b.featured ?? false) - Number(a.featured ?? false),
+    );
+  }, [suppliersData, sort]);
 
-  useEffect(() => {
+  const insights = useMemo(() => {
+    const all = [...(suppliersData?.list ?? []), ...(featured ? [featured] : [])];
+    const rated = all.filter((s) => typeof s.rating === 'string' && s.rating.length > 0);
+    const avgRating =
+      rated.length > 0
+        ? rated.reduce((sum, s) => sum + (parseFloat(s.rating ?? '') || 0), 0) / rated.length
+        : null;
+    const counties = new Set(
+      all.map((s) => s.location?.split(',')[0]?.trim()).filter((v): v is string => !!v),
+    );
+    return {
+      total: all.length,
+      verified: all.filter((s) => s.verified).length,
+      avgRating,
+      counties: counties.size,
+    };
+  }, [suppliersData, featured]);
+
+  const filtersActive =
+    category !== ALL_CATEGORIES || county !== ALL_COUNTIES || sort !== 'Featured';
+
+  const pickCategory = (value: string) => {
+    setCategory(value);
     setOpenMenu(null);
-  }, [category, county, sort]);
+  };
+  const pickCounty = (value: string) => {
+    setCounty(value);
+    setOpenMenu(null);
+  };
+  const pickSort = (value: string) => {
+    setSort(value as Sort);
+    setOpenMenu(null);
+  };
+  const resetFilters = () => {
+    setCategory(ALL_CATEGORIES);
+    setCounty(ALL_COUNTIES);
+    setSort('Featured');
+    setOpenMenu(null);
+  };
 
-  const renderMenu = (id: string, options: string[], onSelect: (v: string) => void) =>
+  const renderMenu = (
+    id: string,
+    options: readonly string[],
+    current: string,
+    onSelect: (v: string) => void,
+  ) =>
     openMenu === id && (
       <View style={styles.filterMenu}>
         {options.map((opt) => (
           <Pressable
             key={opt}
             onPress={() => onSelect(opt)}
-            style={[
-              styles.filterItem,
-              ((id === 'category' && opt === category) ||
-                (id === 'county' && opt === county) ||
-                (id === 'sort' && opt === sort)) &&
-                styles.filterItemActive,
-            ]}
+            accessibilityRole="menuitem"
+            accessibilityState={{ selected: opt === current }}
+            style={[styles.filterItem, opt === current && styles.filterItemActive]}
           >
-            <ThemedText
-              variant="bodyMd"
-              color={
-                (id === 'category' && opt === category) ||
-                (id === 'county' && opt === county) ||
-                (id === 'sort' && opt === sort)
-                  ? colors.primary
-                  : colors.onSurface
-              }
-              style={{ fontSize: 14 }}
-            >
+<ThemedText
+                variant="bodyMd"
+                color={opt === current ? colors.primary : colors.onSurface}
+                style={{ fontSize: 14 }}
+              >
               {opt}
             </ThemedText>
           </Pressable>
@@ -246,20 +298,29 @@ export default function SuppliersScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.chipRow}
           >
-            <Chip label={category} active onPress={() => setOpenMenu(openMenu === 'category' ? null : 'category')} />
-            <Chip label={county} icon="map-pin" onPress={() => setOpenMenu(openMenu === 'county' ? null : 'county')} />
-            <Chip label={sort} icon="arrows-up-down" onPress={() => setOpenMenu(openMenu === 'sort' ? null : 'sort')} />
-            {(category !== CATEGORIES[0] || county !== COUNTIES[0] || sort !== SORTS[0]) && (
-              <Chip label="Reset" onPress={() => {
-                setCategory(CATEGORIES[0]);
-                setCounty(COUNTIES[0]);
-                setSort(SORTS[0]);
-              }} />
-            )}
+            <Chip
+              label={category}
+              active
+              accessibilityLabel={`Category: ${category}`}
+              onPress={() => setOpenMenu(openMenu === 'category' ? null : 'category')}
+            />
+            <Chip
+              label={county}
+              icon="map-pin"
+              accessibilityLabel={`County: ${county}`}
+              onPress={() => setOpenMenu(openMenu === 'county' ? null : 'county')}
+            />
+            <Chip
+              label={sort}
+              icon="arrows-up-down"
+              accessibilityLabel={`Sort: ${sort}`}
+              onPress={() => setOpenMenu(openMenu === 'sort' ? null : 'sort')}
+            />
+            {filtersActive && <Chip label="Reset" onPress={resetFilters} />}
           </ScrollView>
-          {renderMenu('category', CATEGORIES, setCategory)}
-          {renderMenu('county', COUNTIES, setCounty)}
-          {renderMenu('sort', SORTS, setSort)}
+          {renderMenu('category', categoryOptions, category, pickCategory)}
+          {renderMenu('county', countyOptions, county, pickCounty)}
+          {renderMenu('sort', SORTS, sort, pickSort)}
         </View>
 
         {/* Featured supplier */}
@@ -310,23 +371,6 @@ export default function SuppliersScreen() {
               >
                 {featured.description}
               </ThemedText>
-              <Pressable
-                style={styles.quoteBtn}
-                onPress={() =>
-                  Alert.alert('Request Quote', `Send a quote request to ${featured.name}?`, [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Send',
-                      onPress: () => Alert.alert('Request Sent', 'The supplier was notified of your quote request.'),
-                    },
-                  ])
-                }
-              >
-                <ThemedText variant="labelSm" color={colors.onPrimary}>
-                  Request Quote
-                </ThemedText>
-                <Icon name="arrow-right" size={18} color={colors.onPrimary} />
-              </Pressable>
             </View>
           </View>
         )}
@@ -338,26 +382,34 @@ export default function SuppliersScreen() {
           </ThemedText>
           <View style={styles.insightRow}>
             <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
-              Avg. Order Value
+              Suppliers in view
             </ThemedText>
             <ThemedText variant="titleMd" color={colors.primary}>
-              Ksh 45k - 120k
-            </ThemedText>
-          </View>
-          <View style={styles.insightRow}>
-            <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
-              Fulfillment Rate
-            </ThemedText>
-            <ThemedText variant="titleMd" color={colors.onTertiaryContainer}>
-              98.4%
+              {insights.total}
             </ThemedText>
           </View>
           <View style={styles.insightRow}>
             <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
               Verified Partners
             </ThemedText>
+            <ThemedText variant="titleMd" color={colors.onTertiaryContainer}>
+              {insights.verified}
+            </ThemedText>
+          </View>
+          <View style={styles.insightRow}>
+            <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+              Average Rating
+            </ThemedText>
             <ThemedText variant="titleMd" color={colors.primary}>
-              142
+              {insights.avgRating === null ? 'Not rated yet' : insights.avgRating.toFixed(1)}
+            </ThemedText>
+          </View>
+          <View style={styles.insightRow}>
+            <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+              Counties Covered
+            </ThemedText>
+            <ThemedText variant="titleMd" color={colors.primary}>
+              {insights.counties}
             </ThemedText>
           </View>
 
@@ -366,8 +418,11 @@ export default function SuppliersScreen() {
               Looking for bespoke logistics?
             </ThemedText>
             <Pressable
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-              onPress={() => Alert.alert('Gap Map', 'Open the Gap Map tab to explore market intelligence for logistics.')}
+              style={styles.gapMapLinkBtn}
+              accessibilityRole="link"
+              accessibilityLabel="Open the Gap Map tab"
+              hitSlop={8}
+              onPress={() => navigation.navigate('GapMap')}
             >
               <ThemedText variant="labelSm" color={colors.primary}>
                 Explore Gap Map
@@ -379,13 +434,25 @@ export default function SuppliersScreen() {
 
         {/* Supplier cards */}
         <View style={{ gap: 16 }}>
-          {list.length === 0 ? (
-            <View style={styles.emptyList}>
-              <Icon name="cube" size={36} color={colors.outlineVariant} />
-              <ThemedText variant="bodyMd" color={colors.outline} style={{ textAlign: 'center' }}>
-                No suppliers match your filters. Try a different category or county.
-              </ThemedText>
-            </View>
+          {loading && (suppliersData?.list.length ?? 0) === 0 ? (
+            <EmptyState
+              compact
+              icon="cube"
+              title="Loading suppliers…"
+              message="Fetching verified enterprises from the directory."
+            />
+          ) : error ? (
+            <ErrorState
+              title="Couldn't load suppliers"
+              error={error}
+              onRetry={reload}
+            />
+          ) : list.length === 0 ? (
+            <EmptyState
+              icon="cube"
+              title="No suppliers match your filters"
+              message="Try a different category or county, or reset the filters to see the full directory."
+            />
           ) : (
             list.map((supplier) => (
               <SupplierCard
@@ -403,8 +470,8 @@ export default function SuppliersScreen() {
           )}
         </View>
 
-        {/* Become a supplier CTA */}
-        <Pressable style={styles.ctaCard} onPress={() => Alert.alert('Become a Supplier', 'Opening the supplier onboarding form.')}>
+        {/* Become a supplier */}
+        <View style={styles.ctaCard}>
           <LinearGradient
             colors={[colors.primary, colors.primary]}
             style={StyleSheet.absoluteFill}
@@ -415,25 +482,12 @@ export default function SuppliersScreen() {
             <ThemedText variant="headline" color={colors.onPrimary} style={styles.ctaTitle}>
               Grow Your Enterprise with SokoCircle
             </ThemedText>
-            <ThemedText variant="bodyLg" color={colors.primaryFixedDim} style={{ marginTop: 12, marginBottom: 24 }}>
-              Join our curated directory of verified MSMEs. Access institutional
-              buyers, secure transparent quotes, and build trust across borders.
+            <ThemedText variant="bodyLg" color={colors.primaryFixedDim} style={{ marginTop: 12 }}>
+              Supplier onboarding opens once verification reviews are live. Every
+              enterprise in the directory is vetted before it appears here.
             </ThemedText>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-              <Pressable style={styles.ctaPrimaryBtn} onPress={() => Alert.alert('Become a Supplier', 'Opening the supplier onboarding form.')}>
-                <ThemedText variant="labelSm" color={colors.onSecondaryContainer} style={{ fontWeight: '700' }}>
-                  Become a Supplier
-                </ThemedText>
-                <Icon name="rocket-launch" size={18} color={colors.onSecondaryContainer} variant="solid" />
-              </Pressable>
-              <Pressable style={styles.ctaOutlineBtn} onPress={() => Alert.alert('Supplier Requirements', 'View the KYC and compliance requirements to join the directory.')}>
-                <ThemedText variant="labelSm" color={colors.onPrimary}>
-                  View Requirements
-                </ThemedText>
-              </Pressable>
-            </View>
           </View>
-        </Pressable>
+        </View>
       </ScrollView>
     </View>
   );
@@ -459,7 +513,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryContainer,
     borderWidth: 0,
   },
-  chipLabelActive: { color: colors.onPrimaryContainer },
 
   filterMenu: {
     position: 'absolute',
@@ -507,18 +560,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
   },
-  quoteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: colors.primary,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: radii.md,
-    marginTop: 20,
-  },
 
   insightsCard: {
     backgroundColor: colors.surfaceContainerLow,
@@ -542,7 +583,11 @@ const styles = StyleSheet.create({
     borderBottomColor: rgba(colors.outlineVariant, 0.1),
     paddingBottom: 8,
   },
-  gapMapLink: {
+  gapMapLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },  gapMapLink: {
     marginTop: 8,
     padding: 12,
     backgroundColor: colors.surfaceBright,
@@ -612,19 +657,7 @@ const styles = StyleSheet.create({
     borderTopColor: rgba(colors.outlineVariant, 0.1),
     paddingTop: 14,
   },
-  sendBtn: {
-    backgroundColor: colors.surfaceContainerHigh,
-    padding: 8,
-    borderRadius: 999,
-  },
 
-  emptyList: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 48,
-    gap: 8,
-    paddingHorizontal: 24,
-  },
 
   ctaCard: {
     borderRadius: radii.xl,
@@ -653,20 +686,4 @@ const styles = StyleSheet.create({
     opacity: 0.1,
   },
   ctaTitle: { fontSize: 28, maxWidth: 320 },
-  ctaPrimaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: colors.secondaryContainer,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: radii.md,
-  },
-  ctaOutlineBtn: {
-    borderWidth: 1,
-    borderColor: colors.outline,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: radii.md,
-  },
 });

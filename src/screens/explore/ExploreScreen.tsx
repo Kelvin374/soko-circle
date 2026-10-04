@@ -1,7 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -11,17 +10,17 @@ import {
   ViewProps,
 } from 'react-native';
 import TopAppBar from '../../components/TopAppBar';
+import ErrorState from '../../components/ErrorState';
+import EmptyState from '../../components/EmptyState';
 import ThemedText from '../../components/ThemedText';
-import Icon, { IconName } from '../../components/Icon';
+import Icon from '../../components/Icon';
 import { colors } from '../../theme/colors';
-import { radii, shadows, spacing } from '../../theme';
+import { shadows, spacing } from '../../theme';
 import { rgba } from '../../utils/color';
 import { useCategories } from '../../hooks/useData';
 import { ExploreCategory } from '../../types';
 
 type CategoryCardProps = ExploreCategory & {
-  onPress?: () => void;
-  onJoinPress?: () => void;
   style?: ViewProps['style'];
 };
 
@@ -40,20 +39,16 @@ function CategoryCard({
   image,
   dark = false,
   simple = false,
-  onPress,
-  onJoinPress,
   style,
 }: CategoryCardProps) {
   const textOn = dark ? colors.surface : colors.onSurface;
   const textMuted = dark ? colors.primaryFixed : colors.onSurfaceVariant;
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
+    <View
+      style={[
         styles.categoryCard,
         { height },
         style,
-        pressed && { transform: [{ scale: 0.99 }] },
       ]}
     >
       {image ? (
@@ -102,14 +97,16 @@ function CategoryCard({
             </ThemedText>
           </View>
         )}
-        {badge && (
-          <Pressable style={styles.joinBtn} onPress={onJoinPress}>
-            <ThemedText variant="labelSm" color={colors.onSecondaryContainer}>
-              Join Network
+{badge ? (
+          <View style={[styles.joinBtn, !dark && styles.joinBtnLight]}>
+            <ThemedText
+              variant="labelSm"
+              color={dark ? colors.onSecondaryContainer : colors.secondary}
+            >
+              {badge}
             </ThemedText>
-            <Icon name="arrow-right" size={16} color={colors.onSecondaryContainer} />
-          </Pressable>
-        )}
+          </View>
+        ) : null}
       </View>
 
       <View>
@@ -136,16 +133,16 @@ function CategoryCard({
               </ThemedText>
             </View>
           ) : null}
-        </View>
+</View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
 export default function ExploreScreen() {
-  const { data: categories } = useCategories();
+  const { data: categories, loading, error, reload } = useCategories();
   const [query, setQuery] = useState('');
-  const all = categories ?? [];
+  const all = useMemo(() => categories ?? [], [categories]);
   const list = useMemo(() => {
     if (!query.trim()) return all;
     const q = query.trim().toLowerCase();
@@ -159,13 +156,6 @@ export default function ExploreScreen() {
 
   const first = list[0];
   const rest = list.slice(1);
-
-  const handleJoin = (title: string) => {
-    Alert.alert('Join Network', `Request to join the ${title} network.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Join', onPress: () => Alert.alert('Request Sent', `Your request to join ${title} was submitted.`) },
-    ]);
-  };
 
   return (
     <View style={styles.screen}>
@@ -190,7 +180,7 @@ export default function ExploreScreen() {
           </ThemedText>
         </View>
 
-        {/* Search */}
+{/* Search */}
         <View style={styles.searchWrap}>
           <Icon name="magnifying-glass" size={22} color={colors.outline} />
           <TextInput
@@ -200,74 +190,82 @@ export default function ExploreScreen() {
             autoCorrect={false}
             value={query}
             onChangeText={setQuery}
+            accessibilityLabel="Search categories"
           />
-          <Pressable
-            style={styles.tuneBtn}
-            hitSlop={8}
-            onPress={() =>
-              Alert.alert('Filters', 'Advanced filters are coming soon. Try searching for a category or county.')
-            }
-          >
-            <Icon name="funnel" size={18} color={colors.onSurfaceVariant} />
-          </Pressable>
+          {query ? (
+            <Pressable
+              style={styles.tuneBtn}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              onPress={() => setQuery('')}
+            >
+              <Icon name="chevron-down" size={18} color={colors.onSurfaceVariant} />
+            </Pressable>
+          ) : null}
         </View>
 
         {/* Bento grid */}
         <View style={styles.bento}>
-          {list.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Icon name="magnifying-glass" size={36} color={colors.outlineVariant} />
-              <ThemedText variant="bodyMd" color={colors.outline} style={{ marginTop: 8 }}>
-                No categories match "{query}". Try a different search.
-              </ThemedText>
-            </View>
-          ) : (<>
-          {first && (
-            <CategoryCard
-              key={first.id}
-              {...first}
-              height={320}
-              onPress={() => handleJoin(first.title)}
-              onJoinPress={() => handleJoin(first.title)}
+          {loading && all.length === 0 ? (
+            <EmptyState
+              compact
+              icon="squares-2x2"
+              title="Loading categories…"
+              message="Fetching the market ecosystem from SokoCircle."
             />
-          )}
-
-          {rest.length > 0 && (
+          ) : error ? (
+            <ErrorState
+              title="Couldn't load categories"
+              error={error}
+              onRetry={reload}
+            />
+          ) : list.length === 0 ? (
+            <EmptyState
+              icon="magnifying-glass"
+              title={
+                all.length === 0 ? 'No categories published yet' : 'No categories match your search'
+              }
+              message={
+                all.length === 0
+                  ? 'Category networks will appear here once they are published.'
+                  : `Nothing matched "${query.trim()}". Try a different search term.`
+              }
+            />
+          ) : (
             <>
-              {/* Small row pair */}
-              <View style={styles.smallRow}>
-                <CategoryCard
-                  key={rest[0].id}
-                  {...rest[0]}
-                  simple
-                  height={210}
-                  style={styles.cardHalf}
-                  onPress={() => handleJoin(rest[0].title)}
-                />
-                {rest[1] && (
-                  <CategoryCard
-                    key={rest[1].id}
-                    {...rest[1]}
-                    simple
-                    height={210}
-                    style={styles.cardHalf}
-                    onPress={() => handleJoin(rest[1].title)}
-                  />
-                )}
-              </View>
+              {first && <CategoryCard key={first.id} {...first} height={320} />}
 
-              {/* Medium cards */}
-              {rest.slice(2).map((c) => (
-                <CategoryCard
-                  key={c.id}
-                  {...c}
-                  height={200}
-                  onPress={() => handleJoin(c.title)}
-                />
-              ))}
+              {rest.length > 0 && (
+                <>
+                  {/* Small row pair */}
+                  <View style={styles.smallRow}>
+                    <CategoryCard
+                      key={rest[0].id}
+                      {...rest[0]}
+                      simple
+                      height={210}
+                      style={styles.cardHalf}
+                    />
+                    {rest[1] && (
+                      <CategoryCard
+                        key={rest[1].id}
+                        {...rest[1]}
+                        simple
+                        height={210}
+                        style={styles.cardHalf}
+                      />
+                    )}
+                  </View>
+
+                  {/* Medium cards */}
+                  {rest.slice(2).map((c) => (
+                    <CategoryCard key={c.id} {...c} height={200} />
+                  ))}
+                </>
+              )}
             </>
           )}
-          </>)}
         </View>
       </ScrollView>
     </View>
@@ -336,7 +334,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
   },
-  joinBtn: {
+joinBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -344,6 +342,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 999,
+  },
+  joinBtnLight: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
   },
   memberRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   memberChip: {
