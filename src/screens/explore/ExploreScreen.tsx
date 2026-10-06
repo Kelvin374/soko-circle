@@ -9,6 +9,10 @@ import {
   View,
   ViewProps,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import TopAppBar from '../../components/TopAppBar';
 import ErrorState from '../../components/ErrorState';
 import EmptyState from '../../components/EmptyState';
@@ -19,6 +23,12 @@ import { shadows, spacing } from '../../theme';
 import { rgba } from '../../utils/color';
 import { useCategories } from '../../hooks/useData';
 import { ExploreCategory } from '../../types';
+import type { RootStackParamList, TabParamList } from '../../navigation/types';
+
+type Nav = CompositeNavigationProp<
+  BottomTabNavigationProp<TabParamList>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 type CategoryCardProps = ExploreCategory & {
   style?: ViewProps['style'];
@@ -40,15 +50,20 @@ function CategoryCard({
   dark = false,
   simple = false,
   style,
-}: CategoryCardProps) {
+  onPress,
+}: CategoryCardProps & { onPress?: () => void }) {
   const textOn = dark ? colors.surface : colors.onSurface;
   const textMuted = dark ? colors.primaryFixed : colors.onSurfaceVariant;
   return (
-    <View
-      style={[
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`View ${title} category`}
+      style={({ pressed }) => [
         styles.categoryCard,
         { height },
         style,
+        pressed && { opacity: 0.8 },
       ]}
     >
       {image ? (
@@ -135,11 +150,12 @@ function CategoryCard({
           ) : null}
 </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
 export default function ExploreScreen() {
+  const navigation = useNavigation<Nav>();
   const { data: categories, loading, error, reload } = useCategories();
   const [query, setQuery] = useState('');
   const all = useMemo(() => categories ?? [], [categories]);
@@ -200,7 +216,7 @@ export default function ExploreScreen() {
               accessibilityLabel="Clear search"
               onPress={() => setQuery('')}
             >
-              <Icon name="chevron-down" size={18} color={colors.onSurfaceVariant} />
+              <Icon name="chevron-down" size={18} color={colors.onSurfaceVariant} style={{ transform: [{ rotate: '180deg' }] }} />
             </Pressable>
           ) : null}
         </View>
@@ -234,7 +250,7 @@ export default function ExploreScreen() {
             />
           ) : (
             <>
-              {first && <CategoryCard key={first.id} {...first} height={320} />}
+              {first && <CategoryCard key={first.id} {...first} height={320} onPress={() => navigation.navigate('Suppliers', { category: first.title })} />}
 
               {rest.length > 0 && (
                 <>
@@ -246,6 +262,7 @@ export default function ExploreScreen() {
                       simple
                       height={210}
                       style={styles.cardHalf}
+                      onPress={() => navigation.navigate('Suppliers', { category: rest[0].title })}
                     />
                     {rest[1] && (
                       <CategoryCard
@@ -254,13 +271,14 @@ export default function ExploreScreen() {
                         simple
                         height={210}
                         style={styles.cardHalf}
+                        onPress={() => navigation.navigate('Suppliers', { category: rest[1].title })}
                       />
                     )}
                   </View>
 
                   {/* Medium cards */}
                   {rest.slice(2).map((c) => (
-                    <CategoryCard key={c.id} {...c} height={200} />
+                    <CategoryCard key={c.id} {...c} height={200} onPress={() => navigation.navigate('Suppliers', { category: c.title })} />
                   ))}
                 </>
               )}

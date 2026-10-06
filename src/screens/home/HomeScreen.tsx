@@ -20,7 +20,7 @@ import { colors } from '../../theme/colors';
 import { spacing, radii, shadows } from '../../theme';
 import { rgba } from '../../utils/color';
 import { fmtTime, greetingForDate } from '../../lib/format';
-import { useFeed, useLikedPostIds, usePostCategories } from '../../hooks/useData';
+import { useFeed, useLikedPostIds, usePostCategories, useProfile } from '../../hooks/useData';
 import { setPostLiked } from '../../lib/api';
 import { FeedPost } from '../../types';
 
@@ -177,6 +177,7 @@ export default function HomeScreen() {
   const [activeChip, setActiveChip] = useState<string | null>(null);
   const feed = useFeed(activeChip);
   const liked = useLikedPostIds();
+  const profile = useProfile();
 
   const [likedOverride, setLikedOverride] = useState<Record<string, boolean>>({});
   const [commentPostId, setCommentPostId] = useState<string | null>(null);
@@ -205,20 +206,21 @@ export default function HomeScreen() {
         ),
       );
 
-      try {
-        await setPostLiked(post.id, !wasLiked);
-      } catch {
-        // Roll back — the like did not persist.
-        setLikedOverride((prev) => ({ ...prev, [post.id]: wasLiked }));
-        feed.setItems((items) =>
-          items.map((p) =>
-            p.id === post.id ? { ...p, likes: Math.max(0, p.likes + (wasLiked ? 1 : -1)) } : p,
-          ),
-        );
-      }
-    },
-    [feed, isLiked],
-  );
+        try {
+          await setPostLiked(post.id, !wasLiked);
+          await liked.reload();
+        } catch {
+          // Roll back — the like did not persist.
+          setLikedOverride((prev) => ({ ...prev, [post.id]: wasLiked }));
+          feed.setItems((items) =>
+            items.map((p) =>
+              p.id === post.id ? { ...p, likes: Math.max(0, p.likes + (wasLiked ? 1 : -1)) } : p,
+            ),
+          );
+        }
+      },
+      [feed, isLiked, liked],
+    );
 
   const posts = feed.data ?? [];
   const showSkeleton = feed.loading && posts.length === 0;
@@ -235,18 +237,20 @@ export default function HomeScreen() {
         contentContainerStyle={[styles.content, { paddingTop: 24 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl
-            refreshing={feed.loading && posts.length > 0}
-            onRefresh={feed.reload}
-            tintColor={colors.primary}
-          />
+            <RefreshControl
+              refreshing={feed.loading && posts.length > 0}
+              onRefresh={async () => {
+                await Promise.all([feed.reload(), liked.reload(), profile.reload()]);
+              }}
+              tintColor={colors.primary}
+            />
         }
       >
-        <View style={styles.welcome}>
-          <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
-            {greetingForDate()} —
-          </ThemedText>
-        </View>
+          <View style={styles.welcome}>
+            <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+              {greetingForDate()}, {profile.data?.fullName || 'Trader'}!
+            </ThemedText>
+          </View>
 
         {/* Filter chips mirror the categories actually present in the feed. */}
         {chips.length > 1 && (

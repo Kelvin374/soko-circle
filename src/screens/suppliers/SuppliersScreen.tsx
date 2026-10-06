@@ -438,7 +438,7 @@ export default function SuppliersScreen() {
             <EmptyState
               compact
               icon="cube"
-              title="Loading suppliers…"
+              title="Loading suppliers..."
               message="Fetching verified enterprises from the directory."
             />
           ) : error ? (
@@ -687,3 +687,5 @@ const styles = StyleSheet.create({
   },
   ctaTitle: { fontSize: 28, maxWidth: 320 },
 });
+
+
