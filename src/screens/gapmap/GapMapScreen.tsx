@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Image,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,80 +10,285 @@ import {
 } from 'react-native';
 import TopAppBar from '../../components/TopAppBar';
 import ThemedText from '../../components/ThemedText';
-import Icon from '../../components/Icon';
+import Icon, { IconName } from '../../components/Icon';
 import ErrorState from '../../components/ErrorState';
 import EmptyState from '../../components/EmptyState';
 import { colors } from '../../theme/colors';
 import { radii, shadows, spacing } from '../../theme';
 import { rgba } from '../../utils/color';
-import { useAnalytics, useCategories, useGapReports, useProfile } from '../../hooks/useData';
-import { COUNTY_NAMES, POPULAR_WARDS } from '../../lib/locations';
+import {
+  useAnalytics,
+  useCategories,
+  useGapReports,
+  useGeoLocations,
+  useProfile,
+} from '../../hooks/useData';
 import { formatKsh } from '../../lib/format';
-import { GapReport } from '../../types';
+import { countyFromLocation } from '../../lib/locations';
+import { CountyAnalytics, DataSource, GapReport, LocationOption } from '../../types';
 
 const TOPO_IMG =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuCUYG67f8lTVhR53Yovg5IZu6ZaNAEbCFqbRpPVXvVt10NAiSMDO6RSQOZJY6Sr1F6APzKPy2hSw1jM-TyqwWFp7knaznJnCkzKSxVlDJ9xs_9ggLmHrbc1sd48-8ab20KIx1aOxwyYDzNIXtP8lOcSWT-TUvCJBv8k2ryvPxhHlfzv_j-FUD9hKQH0IAmIQLB1qec2iHlWsdyj1shm1LhdmniWn3gNnb3DTgaCJmmOV1NtuBGJNX8T';
 
-const LOCATION_OPTIONS = [
-  ...POPULAR_WARDS.map((w) => `${w.ward}, ${w.county}`),
-  ...COUNTY_NAMES,
-];
+const LEVEL_LABEL: Record<LocationOption['level'], string> = {
+  county: 'County',
+  subcounty: 'Sub-county',
+  constituency: 'Constituency',
+  ward: 'Ward',
+  town: 'Town',
+};
 
 type SelectProps = {
   label: string;
+  icon: IconName;
   options: string[];
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
 };
 
-function Select({ label, options, value, onChange, disabled }: SelectProps) {
+function Select({ label, icon, options, value, onChange, disabled }: SelectProps) {
   const [open, setOpen] = useState(false);
+  const canOpen = !disabled && options.length > 0;
+
   return (
-    <View style={{ flex: 1 }}>
+    <View style={[styles.fieldWrap, open && styles.fieldWrapOpen]}>
       <ThemedText
         variant="labelSm"
         color={colors.onSurfaceVariant}
-        style={{ marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}
+        style={styles.fieldLabel}
       >
         {label}
       </ThemedText>
       <Pressable
-        onPress={() => !disabled && options.length > 0 && setOpen((v) => !v)}
+        onPress={() => canOpen && setOpen((v) => !v)}
         accessibilityRole="button"
         accessibilityLabel={`${label}: ${value || 'none selected'}`}
-        accessibilityState={{ disabled: !!disabled || options.length === 0, expanded: open }}
-        style={[styles.selectInput, disabled && styles.selectInputDisabled]}
+        accessibilityState={{ disabled: !canOpen, expanded: open }}
+        style={[
+          styles.selectInput,
+          open && styles.selectInputOpen,
+          disabled && styles.selectInputDisabled,
+        ]}
       >
-        <ThemedText variant="bodyMd" color={colors.onSurface} numberOfLines={1}>
+        <View style={[styles.selectIconWrap, open && styles.selectIconWrapOpen]}>
+          <Icon
+            name={icon}
+            size={16}
+            color={open ? colors.onPrimary : colors.primary}
+          />
+        </View>
+        <ThemedText
+          variant="bodyMd"
+          color={value ? colors.onSurface : colors.outline}
+          numberOfLines={1}
+          style={{ flex: 1 }}
+        >
           {value || 'None'}
         </ThemedText>
-        <Icon name="chevron-down" size={20} color={colors.outline} />
+        <Icon
+          name="chevron-down"
+          size={18}
+          color={open ? colors.primary : colors.outline}
+          style={open ? styles.chevronOpen : undefined}
+        />
       </Pressable>
-      {open && (
+
+      {open ? (
         <View style={styles.selectMenu}>
-          {options.map((opt) => (
-            <Pressable
-              key={opt}
-              onPress={() => {
-                onChange(opt);
-                setOpen(false);
-              }}
-              style={[
-                styles.selectItem,
-                opt === value && styles.selectItemActive,
-              ]}
-            >
-              <ThemedText
-                variant="bodyMd"
-                color={opt === value ? colors.primary : colors.onSurface}
-              >
-                {opt}
-              </ThemedText>
-            </Pressable>
-          ))}
+          <View style={styles.menuHeader}>
+            <ThemedText variant="labelSm" color={colors.onSurfaceVariant} style={styles.menuHeaderText}>
+              {label}
+            </ThemedText>
+          </View>
+          <ScrollView
+            style={styles.menuScroll}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {options.map((opt) => {
+              const active = opt === value;
+              return (
+                <Pressable
+                  key={opt}
+                  onPress={() => {
+                    onChange(opt);
+                    setOpen(false);
+                  }}
+                  style={[styles.selectItem, active && styles.selectItemActive]}
+                >
+                  <ThemedText
+                    variant="bodyMd"
+                    color={active ? colors.primary : colors.onSurface}
+                    numberOfLines={1}
+                    style={{ flex: 1 }}
+                  >
+                    {opt}
+                  </ThemedText>
+                  {active ? (
+                    <Icon name="check-badge" size={16} color={colors.primary} variant="solid" />
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
-      )}
+      ) : null}
+    </View>
+  );
+}
+
+type LocationPickerProps = {
+  options: LocationOption[];
+  value: LocationOption | null;
+  onChange: (value: LocationOption) => void;
+  loading?: boolean;
+  error?: Error | null;
+};
+
+/**
+ * Searchable picker over the geo reference tables. Every option carries the
+ * county it resolves to, so granular picks still query county-keyed data.
+ */
+function LocationPicker({ options, value, onChange, loading, error }: LocationPickerProps) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const pool = q
+      ? options.filter(
+          (o) => o.label.toLowerCase().includes(q) || o.county.toLowerCase().includes(q),
+        )
+      : options;
+    return pool.slice(0, 80);
+  }, [options, query]);
+
+  const disabled = !!loading || !!error || options.length === 0;
+  const title = value
+    ? `${value.label}, ${value.county}`
+    : loading
+      ? 'Loading…'
+      : error
+        ? 'Unavailable'
+        : 'None';
+
+  return (
+    <View style={[styles.fieldWrap, open && styles.fieldWrapOpen]}>
+      <ThemedText
+        variant="labelSm"
+        color={colors.onSurfaceVariant}
+        style={styles.fieldLabel}
+      >
+        Location
+      </ThemedText>
+      <Pressable
+        onPress={() => !disabled && setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityLabel={`Location: ${title}`}
+        accessibilityState={{ disabled, expanded: open }}
+        style={[
+          styles.selectInput,
+          open && styles.selectInputOpen,
+          disabled && styles.selectInputDisabled,
+        ]}
+      >
+        <View style={[styles.selectIconWrap, open && styles.selectIconWrapOpen]}>
+          <Icon name="map-pin" size={16} color={open ? colors.onPrimary : colors.primary} />
+        </View>
+        <ThemedText
+          variant="bodyMd"
+          color={value ? colors.onSurface : colors.outline}
+          numberOfLines={1}
+          style={{ flex: 1 }}
+        >
+          {title}
+        </ThemedText>
+        <Icon
+          name="chevron-down"
+          size={18}
+          color={open ? colors.primary : colors.outline}
+          style={open ? styles.chevronOpen : undefined}
+        />
+      </Pressable>
+
+      {open && !disabled ? (
+        <View style={styles.locationMenu}>
+          <View style={styles.locationSearchWrap}>
+            <Icon name="magnifying-glass" size={16} color={colors.outline} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search county, ward, town…"
+              placeholderTextColor={colors.outline}
+              autoCorrect={false}
+              autoCapitalize="none"
+              style={styles.locationSearch}
+              accessibilityLabel="Search locations"
+            />
+          </View>
+          {results.length === 0 ? (
+            <View style={styles.locationEmpty}>
+              <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+                No matching locations.
+              </ThemedText>
+            </View>
+          ) : (
+            <ScrollView
+              style={styles.locationList}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              {results.map((opt) => {
+                const active = opt.value === value?.value;
+                return (
+                  <Pressable
+                    key={opt.value}
+                    onPress={() => {
+                      onChange(opt);
+                      setOpen(false);
+                      setQuery('');
+                    }}
+                    style={[styles.locationItem, active && styles.selectItemActive]}
+                  >
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <ThemedText
+                        variant="bodyMd"
+                        color={active ? colors.primary : colors.onSurface}
+                        numberOfLines={1}
+                      >
+                        {opt.label}
+                      </ThemedText>
+                      <View style={styles.locationMetaRow}>
+                        <View style={styles.levelPill}>
+                          <ThemedText
+                            variant="labelSm"
+                            color={colors.onSurfaceVariant}
+                            style={{ fontSize: 10 }}
+                          >
+                            {LEVEL_LABEL[opt.level]}
+                          </ThemedText>
+                        </View>
+                        <ThemedText
+                          variant="labelSm"
+                          color={colors.onSurfaceVariant}
+                          style={{ fontSize: 11 }}
+                          numberOfLines={1}
+                        >
+                          {opt.county}
+                        </ThemedText>
+                      </View>
+                    </View>
+                    {active ? (
+                      <Icon name="check-badge" size={16} color={colors.primary} variant="solid" />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -120,37 +326,227 @@ function StatBar({
   );
 }
 
+function signalValue(value: number | null, unit = ''): string {
+  if (value == null) return '—';
+  const rounded = Number.isInteger(value) ? value : Math.round(value * 100) / 100;
+  return `${rounded.toLocaleString('en-KE')}${unit}`;
+}
+
+/** County structural signals shown in place of the sector demand bars. */
+function CountySignals({
+  analytics,
+  onOpenSource,
+}: {
+  analytics: CountyAnalytics;
+  onOpenSource: (source: DataSource) => void;
+}) {
+  const signals = [
+    { label: 'Population (2023 proj.)', value: signalValue(analytics.population2023Proj) },
+    { label: 'GDP (USD bn, 2024)', value: signalValue(analytics.gdpUsdBn2024) },
+    { label: 'GDP per capita (USD)', value: signalValue(analytics.gdpPerCapitaUsd2024) },
+    {
+      label: 'GDP p.c. vs national',
+      value:
+        analytics.gdpPerCapitaVsNational == null
+          ? '—'
+          : `${signalValue(analytics.gdpPerCapitaVsNational)}×`,
+    },
+    {
+      label: 'GDP growth 2020–24',
+      value:
+        analytics.avgGdpGrowthPct == null ? '—' : `${signalValue(analytics.avgGdpGrowthPct)}%`,
+    },
+    {
+      label: 'Formal inclusion (2024)',
+      value:
+        analytics.formalInclusionPct2024 == null
+          ? '—'
+          : `${signalValue(analytics.formalInclusionPct2024)}%`,
+    },
+    {
+      label: 'MSME share (2016)',
+      value:
+        analytics.msmeSharePct2016 == null ? '—' : `${signalValue(analytics.msmeSharePct2016)}%`,
+    },
+    {
+      label: 'MSME vs pop share',
+      value:
+        analytics.msmeShareToPopShare == null
+          ? '—'
+          : `${signalValue(analytics.msmeShareToPopShare)}×`,
+    },
+  ].filter((s) => s.value !== '—');
+
+  const badges = [
+    analytics.highGrowth ? 'High growth' : null,
+    analytics.caipPhase1 ? 'CAIP Phase 1 (2025)' : null,
+    analytics.caipNearComplete ? 'CAIP near-complete' : null,
+  ].filter((b): b is string => b !== null);
+
+  return (
+    <View style={{ gap: 20 }}>
+      {analytics.archetype ? (
+        <View style={styles.archetypeCard}>
+          <View style={styles.archetypeHeader}>
+            <Icon name="sparkles" size={16} color={colors.secondary} variant="solid" />
+            <ThemedText
+              variant="labelSm"
+              color={colors.secondary}
+              style={{ textTransform: 'uppercase', letterSpacing: 1 }}
+            >
+              {analytics.archetype.label}
+            </ThemedText>
+          </View>
+          <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+            {analytics.archetype.typicalGaps}
+          </ThemedText>
+        </View>
+      ) : null}
+
+      {signals.length > 0 ? (
+        <View style={styles.signalGrid}>
+          {signals.map((s) => (
+            <View key={s.label} style={styles.signalTile}>
+              <ThemedText variant="titleMd" color={colors.primary}>
+                {s.value}
+              </ThemedText>
+              <ThemedText
+                variant="labelSm"
+                color={colors.onSurfaceVariant}
+                style={{ fontSize: 11 }}
+              >
+                {s.label}
+              </ThemedText>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {badges.length > 0 ? (
+        <View style={styles.badgeRow}>
+          {badges.map((b) => (
+            <View key={b} style={styles.badge}>
+              <ThemedText variant="labelSm" color={colors.secondary} style={{ fontSize: 11 }}>
+                {b}
+              </ThemedText>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {analytics.documentedNotes ? (
+        <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
+          {analytics.documentedNotes}
+        </ThemedText>
+      ) : null}
+
+      {analytics.sources.length > 0 ? (
+        <View style={{ gap: 8 }}>
+          <ThemedText
+            variant="labelSm"
+            color={colors.onSurfaceVariant}
+            style={{ textTransform: 'uppercase', letterSpacing: 1 }}
+          >
+            Sources
+          </ThemedText>
+          {analytics.sources.map((source) => (
+            <Pressable
+              key={source.id}
+              disabled={!source.url}
+              onPress={() => onOpenSource(source)}
+              accessibilityRole="link"
+              accessibilityLabel={`Open source: ${source.title}`}
+              style={styles.sourceRow}
+            >
+              <Icon name="globe-alt" size={14} color={colors.secondary} />
+              <ThemedText
+                variant="labelSm"
+                color={colors.secondary}
+                numberOfLines={2}
+                style={{ flex: 1, fontSize: 11 }}
+              >
+                {source.title}
+                {source.publisher ? ` · ${source.publisher}` : ''}
+                {source.year ? ` (${source.year})` : ''}
+              </ThemedText>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      <ThemedText variant="labelSm" color={colors.onSurfaceVariant} style={{ fontSize: 11 }}>
+        County-level structural signal — not a sector-specific demand score.
+      </ThemedText>
+    </View>
+  );
+}
+
 export default function GapMapScreen() {
   const { data: profile } = useProfile();
   const { data: categories } = useCategories();
+  const locationsState = useGeoLocations();
 
   const categoryOptions = useMemo(
     () => (categories ?? []).map((c) => c.title),
     [categories],
   );
 
-  const [locationChoice, setLocationChoice] = useState<string | null>(null);
+  const locationOptions = useMemo(() => locationsState.data ?? [], [locationsState.data]);
+
+  const [locationChoice, setLocationChoice] = useState<LocationOption | null>(null);
   const [categoryChoice, setCategoryChoice] = useState<string | null>(null);
   const [capital, setCapital] = useState('500000');
   const [overhead, setOverhead] = useState('45000');
   const [revenue, setRevenue] = useState('130000');
 
-  const location = locationChoice ?? profile?.location ?? 'Nairobi';
+  const defaultLocation = useMemo<LocationOption | null>(() => {
+    const target = countyFromLocation(profile?.location);
+    return (
+      locationOptions.find((o) => o.level === 'county' && o.label === target) ??
+      locationOptions.find((o) => o.county === target) ??
+      locationOptions.find((o) => o.level === 'county') ??
+      null
+    );
+  }, [locationOptions, profile?.location]);
+
+  const locationOption = locationChoice ?? defaultLocation;
+  const queryLocation = locationOption?.county ?? 'Nairobi';
+  const locationDisplay = locationOption
+    ? `${locationOption.label}, ${locationOption.county}`
+    : queryLocation;
+
   const category = categoryChoice ?? categoryOptions[0] ?? '';
+
+  // `gap_analytics`/`gap_reports` are keyed by the category's short label
+  // (e.g. "Electronics"), while the dropdown shows the longer title
+  // (e.g. "Gadgets & Repairs"). Query by label, display the title.
+  const categoryKey = useMemo(() => {
+    const match = (categories ?? []).find((c) => c.title === category);
+    return match?.label || category;
+  }, [categories, category]);
 
   const {
     data: analytics,
     loading: analyticsLoading,
     error: analyticsError,
     reload: reloadAnalytics,
-  } = useAnalytics(category || '__none__', location);
+  } = useAnalytics(categoryKey || '__none__', queryLocation);
 
   const {
     data: reports,
     loading: reportsLoading,
     error: reportsError,
     reload: reloadReports,
-  } = useGapReports(category || null);
+  } = useGapReports({ category: categoryKey || null, location: queryLocation });
+
+  const handleOpenSource = useCallback(async (source: DataSource) => {
+    if (!source.url) return;
+    try {
+      await Linking.openURL(source.url);
+    } catch {
+      // A malformed/unsupported URL should not crash the screen.
+    }
+  }, []);
 
   const capitalN = parseFloat(capital) || 0;
   const overheadN = parseFloat(overhead) || 0;
@@ -256,12 +652,19 @@ export default function GapMapScreen() {
           <View style={styles.selectRow}>
             <Select
               label="Category"
+              icon="squares-2x2"
               options={categoryOptions}
               value={category}
               onChange={setCategoryChoice}
               disabled={!hasCategory}
             />
-            <Select label="Location" options={LOCATION_OPTIONS} value={location} onChange={setLocationChoice} />
+            <LocationPicker
+              options={locationOptions}
+              value={locationOption}
+              onChange={setLocationChoice}
+              loading={locationsState.loading}
+              error={locationsState.error}
+            />
           </View>
 
           <Pressable
@@ -290,46 +693,50 @@ export default function GapMapScreen() {
                 Opportunity Score
               </ThemedText>
               <ThemedText variant="bodyMd" color={colors.onSurfaceVariant}>
-                {category || 'No category'} in {location}
+                {category || 'No category'} in {locationDisplay}
               </ThemedText>
             </View>
           </View>
 
-          {!hasCategory ? (
+          {analyticsError ? (
+            <ErrorState
+              title="Couldn't load the analysis"
+              error={analyticsError}
+              onRetry={reloadAnalytics}
+            />
+          ) : analytics ? (
+            analytics.kind === 'county' ? (
+              <CountySignals analytics={analytics} onOpenSource={handleOpenSource} />
+            ) : (
+              <View style={{ gap: 24 }}>
+                <StatBar
+                  label="Consumer Demand"
+                  value={analytics.demandLabel}
+                  pct={analytics.consumerDemandPct}
+                  color={analytics.demandColor}
+                />
+                <StatBar
+                  label="Market Saturation"
+                  value={analytics.saturationLabel}
+                  pct={analytics.marketSaturationPct}
+                  color={analytics.saturationColor}
+                />
+              </View>
+            )
+          ) : !hasCategory ? (
             <EmptyState
               compact
               icon="squares-2x2"
               title="No categories published yet"
               message="Opportunity scores appear once a category network is live."
             />
-          ) : analyticsError ? (
-            <ErrorState
-              title="Couldn't load the analysis"
-              error={analyticsError}
-              onRetry={reloadAnalytics}
-            />
-          ) : !analytics ? (
+          ) : (
             <EmptyState
               compact
               icon="chart-bar"
               title="No data for this selection yet"
-              message={`We have no demand or saturation figures for ${category} in ${location}. Try another location.`}
+              message={`We have no demand or saturation figures for ${category} in ${locationDisplay}. Try another location.`}
             />
-          ) : (
-            <View style={{ gap: 24 }}>
-              <StatBar
-                label="Consumer Demand"
-                value={analytics.demandLabel}
-                pct={analytics.consumerDemandPct}
-                color={analytics.demandColor}
-              />
-              <StatBar
-                label="Market Saturation"
-                value={analytics.saturationLabel}
-                pct={analytics.marketSaturationPct}
-                color={analytics.saturationColor}
-              />
-            </View>
           )}
         </View>
 
@@ -436,11 +843,7 @@ export default function GapMapScreen() {
             <EmptyState
               icon="document-check"
               title="No reports published yet"
-              message={
-                hasCategory
-                  ? `No deep-dive reports have been published for ${category}.`
-                  : 'Deep-dive reports appear once a category network is live.'
-              }
+              message={`No deep-dive reports have been published for ${category ? `${category} in ` : ''}${locationDisplay}.`}
             />
           ) : (
             reports!.map(renderReport)
@@ -463,46 +866,157 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.05)',
     gap: 16,
     ...shadows.card,
+    // Keep the whole selector (and its dropdown menus) above the cards below.
+    zIndex: 10,
+    elevation: 6,
   },
-  selectRow: { flexDirection: 'row', gap: 16 },
+  selectRow: { flexDirection: 'row', gap: 12 },
+  fieldWrap: { flex: 1, zIndex: 1 },
+  fieldWrapOpen: { zIndex: 60 },
+  fieldLabel: {
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontSize: 11,
+    fontWeight: '600',
+  },
   selectInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
+    gap: 10,
     backgroundColor: colors.surfaceContainerLowest,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.outlineVariant,
-    borderRadius: radii.md,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    borderRadius: radii.lg,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minHeight: 50,
   },
-  selectInputDisabled: { opacity: 0.6 },
-  selectMenu: {
-    marginTop: 4,
-    backgroundColor: colors.surfaceContainerLowest,
+  selectInputOpen: {
+    borderColor: colors.primary,
+  },
+  selectInputDisabled: { opacity: 0.55 },
+  selectIconWrap: {
+    width: 32,
+    height: 32,
     borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceContainer,
+  },
+  selectIconWrapOpen: { backgroundColor: colors.primary },
+  chevronOpen: { transform: [{ rotate: '180deg' }] },
+  selectMenu: {
+    marginTop: 6,
+    backgroundColor: colors.surfaceContainerLowest,
+    borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
     overflow: 'hidden',
     position: 'absolute',
-    top: 74,
+    top: 78,
     left: 0,
     right: 0,
     zIndex: 50,
     elevation: 8,
     shadowColor: '#152a4a',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
   },
+  menuHeader: {
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  menuHeaderText: { fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 },
+  menuScroll: { maxHeight: 240 },
   selectItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
   },
   selectItemActive: {
     backgroundColor: colors.surfaceContainer,
   },
+  locationMenu: {
+    marginTop: 6,
+    backgroundColor: colors.surfaceContainerLowest,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    overflow: 'hidden',
+    position: 'absolute',
+    top: 78,
+    right: 0,
+    width: 300,
+    zIndex: 50,
+    elevation: 8,
+    shadowColor: '#152a4a',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+  },
+  locationSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.outlineVariant,
+  },
+  locationSearch: {
+    flex: 1,
+    paddingVertical: 2,
+    fontSize: 15,
+    color: colors.onSurface,
+    fontFamily: 'Inter_400Regular',
+  },
+  locationList: { maxHeight: 280 },
+  locationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  locationMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  levelPill: {
+    backgroundColor: colors.surfaceContainer,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: radii.sm,
+  },
+  locationEmpty: { padding: 16 },
+
+  archetypeCard: {
+    backgroundColor: colors.surfaceContainer,
+    borderRadius: radii.md,
+    padding: 12,
+    gap: 6,
+  },
+  archetypeHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  signalGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  signalTile: {
+    flexBasis: '46%',
+    flexGrow: 1,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.md,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 2,
+  },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  badge: {
+    backgroundColor: rgba(colors.secondary, 0.12),
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  sourceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   analyzeBtn: {
     flexDirection: 'row',
     alignItems: 'center',

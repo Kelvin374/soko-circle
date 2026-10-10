@@ -69,7 +69,18 @@ export type GapReport = {
   location: string;
 };
 
-export type GapAnalytics = {
+/** Rule-based county archetype from `gap_archetypes`. */
+export type GapArchetype = {
+  code: string;
+  label: string;
+  rule: string;
+  typicalGaps: string;
+  evidenceLevel: string;
+};
+
+/** Sector-level demand/saturation score for one category + location. */
+export type SectorAnalytics = {
+  kind: 'sector';
   category: string;
   location: string;
   consumerDemandPct: number;
@@ -78,6 +89,50 @@ export type GapAnalytics = {
   demandColor: string;
   saturationLabel: string;
   saturationColor: string;
+};
+
+/**
+ * County-level structural signal (category-agnostic). Rendered instead of the
+ * demand/saturation bars because it carries GDP, population and inclusion data
+ * rather than a sector score.
+ */
+export type CountyAnalytics = {
+  kind: 'county';
+  category: string;
+  location: string;
+  countyCode: string | null;
+  population2023Proj: number | null;
+  gdpUsdBn2024: number | null;
+  gdpPerCapitaUsd2024: number | null;
+  gdpPerCapitaVsNational: number | null;
+  avgGdpGrowthPct: number | null;
+  highGrowth: boolean | null;
+  formalInclusionPct2024: number | null;
+  finAccessFlag: string | null;
+  msmeSharePct2016: number | null;
+  msmeShareToPopShare: number | null;
+  caipPhase1: boolean | null;
+  caipNearComplete: boolean | null;
+  documentedNotes: string | null;
+  archetype: GapArchetype | null;
+  sources: DataSource[];
+};
+
+export type GapAnalytics = SectorAnalytics | CountyAnalytics;
+
+/** Administrative level a pickable location belongs to. */
+export type LocationLevel = 'county' | 'subcounty' | 'constituency' | 'ward' | 'town';
+
+/**
+ * A selectable location loaded from the geo reference tables. Every option
+ * resolves to a `county`, because the gap analytics/reports are county-keyed.
+ */
+export type LocationOption = {
+  /** Unique option key (`label · level · code`). */
+  value: string;
+  label: string;
+  county: string;
+  level: LocationLevel;
 };
 
 /**
@@ -113,4 +168,17 @@ export type PostComment = {
   body: string;
   createdAt: string;
   isMine: boolean;
+};
+
+/**
+ * A reference source / article backing the circle's market data. `url` is the
+ * page opened when a reader taps the snippet.
+ */
+export type DataSource = {
+  id: string;
+  title: string;
+  publisher: string | null;
+  url: string | null;
+  year: number | null;
+  reliability: string;
 };

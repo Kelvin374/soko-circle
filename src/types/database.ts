@@ -294,6 +294,11 @@ export type Database = {
           preview_image_url: string | null;
           is_unlocked: boolean;
           price_ksh: number;
+          /** Added in 0011. Nullable geo categorisation links. */
+          subcounty_code: string | null;
+          constituency_code: string | null;
+          ward_code: string | null;
+          town_code: string | null;
         };
         Insert: {
           id?: string;
@@ -308,6 +313,10 @@ export type Database = {
           preview_image_url?: string | null;
           is_unlocked?: boolean;
           price_ksh?: number;
+          subcounty_code?: string | null;
+          constituency_code?: string | null;
+          ward_code?: string | null;
+          town_code?: string | null;
         };
         Update: Partial<{
           id: string;
@@ -322,6 +331,10 @@ export type Database = {
           preview_image_url: string | null;
           is_unlocked: boolean;
           price_ksh: number;
+          subcounty_code: string | null;
+          constituency_code: string | null;
+          ward_code: string | null;
+          town_code: string | null;
         }>;
         Relationships: [];
       };
@@ -333,6 +346,28 @@ export type Database = {
           location: string;
           consumer_demand_pct: number;
           market_saturation_pct: number;
+          /** Added in 0011 (county gap signals). Null for sector-level rows. */
+          county_code: string | null;
+          population_2023_proj: number | null;
+          gdp_usd_bn_2024: number | null;
+          gdp_per_capita_usd_2024: number | null;
+          gdp_per_capita_vs_national: number | null;
+          avg_gdp_growth_2020_24_pct: number | null;
+          high_growth: boolean | null;
+          formal_inclusion_pct_2024: number | null;
+          fin_access_flag: string | null;
+          msme_share_pct_2016: number | null;
+          msme_share_to_pop_share: number | null;
+          caip_phase1_cohort_2025: boolean | null;
+          caip_near_complete_2026: boolean | null;
+          archetype: string | null;
+          documented_notes: string | null;
+          source_ids: string[];
+          /** Added in 0011. Nullable geo categorisation links. */
+          subcounty_code: string | null;
+          constituency_code: string | null;
+          ward_code: string | null;
+          town_code: string | null;
         };
         Insert: {
           id?: string;
@@ -341,6 +376,26 @@ export type Database = {
           location: string;
           consumer_demand_pct?: number;
           market_saturation_pct?: number;
+          county_code?: string | null;
+          population_2023_proj?: number | null;
+          gdp_usd_bn_2024?: number | null;
+          gdp_per_capita_usd_2024?: number | null;
+          gdp_per_capita_vs_national?: number | null;
+          avg_gdp_growth_2020_24_pct?: number | null;
+          high_growth?: boolean | null;
+          formal_inclusion_pct_2024?: number | null;
+          fin_access_flag?: string | null;
+          msme_share_pct_2016?: number | null;
+          msme_share_to_pop_share?: number | null;
+          caip_phase1_cohort_2025?: boolean | null;
+          caip_near_complete_2026?: boolean | null;
+          archetype?: string | null;
+          documented_notes?: string | null;
+          source_ids?: string[];
+          subcounty_code?: string | null;
+          constituency_code?: string | null;
+          ward_code?: string | null;
+          town_code?: string | null;
         };
         Update: Partial<{
           id: string;
@@ -349,6 +404,173 @@ export type Database = {
           location: string;
           consumer_demand_pct: number;
           market_saturation_pct: number;
+          county_code: string | null;
+          population_2023_proj: number | null;
+          gdp_usd_bn_2024: number | null;
+          gdp_per_capita_usd_2024: number | null;
+          gdp_per_capita_vs_national: number | null;
+          avg_gdp_growth_2020_24_pct: number | null;
+          high_growth: boolean | null;
+          formal_inclusion_pct_2024: number | null;
+          fin_access_flag: string | null;
+          msme_share_pct_2016: number | null;
+          msme_share_to_pop_share: number | null;
+          caip_phase1_cohort_2025: boolean | null;
+          caip_near_complete_2026: boolean | null;
+          archetype: string | null;
+          documented_notes: string | null;
+          source_ids: string[];
+          subcounty_code: string | null;
+          constituency_code: string | null;
+          ward_code: string | null;
+          town_code: string | null;
+        }>;
+        Relationships: [];
+      };
+      /** Added in 0010. KNBS county population reference; public read-only. */
+      counties: {
+        Row: {
+          code: string;
+          name: string;
+          population_2019: number;
+          population_2023_proj: number | null;
+          source_id: string | null;
+        };
+        Insert: {
+          code: string;
+          name: string;
+          population_2019: number;
+          population_2023_proj?: number | null;
+          source_id?: string | null;
+        };
+        Update: Partial<{
+          code: string;
+          name: string;
+          population_2019: number;
+          population_2023_proj: number | null;
+          source_id: string | null;
+        }>;
+        Relationships: [];
+      };
+      /** Added in 0011. Rule-based county archetypes; public read-only. */
+      gap_archetypes: {
+        Row: {
+          code: string;
+          label: string;
+          rule: string;
+          typical_gaps: string;
+          evidence_level: string;
+        };
+        Insert: {
+          code: string;
+          label: string;
+          rule: string;
+          typical_gaps: string;
+          evidence_level: string;
+        };
+        Update: Partial<{
+          code: string;
+          label: string;
+          rule: string;
+          typical_gaps: string;
+          evidence_level: string;
+        }>;
+        Relationships: [];
+      };
+      /** Added in 0011. IEBC/administrative level 2; public read-only. */
+      subcounties: {
+        Row: {
+          code: string;
+          county_code: string;
+          name: string;
+          latitude: number | null;
+          longitude: number | null;
+        };
+        Insert: {
+          code: string;
+          county_code: string;
+          name: string;
+          latitude?: number | null;
+          longitude?: number | null;
+        };
+        Update: Partial<{
+          code: string;
+          county_code: string;
+          name: string;
+          latitude: number | null;
+          longitude: number | null;
+        }>;
+        Relationships: [];
+      };
+      /** Added in 0011. IEBC constituencies (290); public read-only. */
+      constituencies: {
+        Row: {
+          code: string;
+          county_code: string;
+          subcounty_code: string | null;
+          name: string;
+        };
+        Insert: {
+          code: string;
+          county_code: string;
+          subcounty_code?: string | null;
+          name: string;
+        };
+        Update: Partial<{
+          code: string;
+          county_code: string;
+          subcounty_code: string | null;
+          name: string;
+        }>;
+        Relationships: [];
+      };
+      /** Added in 0011. IEBC wards (1450); public read-only. */
+      wards: {
+        Row: {
+          code: string;
+          constituency_code: string;
+          name: string;
+          latitude: number | null;
+          longitude: number | null;
+        };
+        Insert: {
+          code: string;
+          constituency_code: string;
+          name: string;
+          latitude?: number | null;
+          longitude?: number | null;
+        };
+        Update: Partial<{
+          code: string;
+          constituency_code: string;
+          name: string;
+          latitude: number | null;
+          longitude: number | null;
+        }>;
+        Relationships: [];
+      };
+      /** Added in 0011. KNBS 2019 census urban centres; public read-only. */
+      towns: {
+        Row: {
+          code: string;
+          county_code: string | null;
+          name: string;
+          population_2019: number | null;
+          county_label: string | null;
+        };
+        Insert: {
+          code: string;
+          county_code?: string | null;
+          name: string;
+          population_2019?: number | null;
+          county_label?: string | null;
+        };
+        Update: Partial<{
+          code: string;
+          county_code: string | null;
+          name: string;
+          population_2019: number | null;
+          county_label: string | null;
         }>;
         Relationships: [];
       };
@@ -426,6 +648,34 @@ export type Database = {
           post_id: string | null;
           read_at: string | null;
           created_at: string;
+        }>;
+        Relationships: [];
+      };
+      /** Added in 0010. Reference sources; public read-only. */
+      data_sources: {
+        Row: {
+          id: string;
+          title: string;
+          publisher: string | null;
+          url: string | null;
+          year: number | null;
+          reliability: string;
+        };
+        Insert: {
+          id: string;
+          title: string;
+          publisher?: string | null;
+          url?: string | null;
+          year?: number | null;
+          reliability: string;
+        };
+        Update: Partial<{
+          id: string;
+          title: string;
+          publisher: string | null;
+          url: string | null;
+          year: number | null;
+          reliability: string;
         }>;
         Relationships: [];
       };

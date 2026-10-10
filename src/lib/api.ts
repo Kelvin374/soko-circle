@@ -1,12 +1,17 @@
 import { File } from 'expo-file-system';
 import { supabase } from './supabase';
 import { fmtTime } from './format';
+import { COUNTIES } from './locations';
 import { Database } from '../types/database';
 import {
+  CountyAnalytics,
+  DataSource,
   ExploreCategory,
   FeedPost,
   GapAnalytics,
+  GapArchetype,
   GapReport,
+  LocationOption,
   PostComment,
   PostsPage,
   Supplier,
@@ -14,13 +19,42 @@ import {
 } from '../types';
 
 type ProfileRow = Database['public']['Tables']['profiles']['Row'];
+type DataSourceRow = Database['public']['Tables']['data_sources']['Row'];
 type SupplierRow = Database['public']['Tables']['suppliers']['Row'];
 type PostRow = Database['public']['Tables']['posts']['Row'];
 type GapReportRow = Database['public']['Tables']['gap_reports']['Row'];
 type AnalyticsRow = Database['public']['Tables']['gap_analytics']['Row'];
+type ArchetypeRow = Database['public']['Tables']['gap_archetypes']['Row'];
+type CountyRow = Database['public']['Tables']['counties']['Row'];
+type SubcountyRow = Database['public']['Tables']['subcounties']['Row'];
+type ConstituencyRow = Database['public']['Tables']['constituencies']['Row'];
+type WardRow = Database['public']['Tables']['wards']['Row'];
+type TownRow = Database['public']['Tables']['towns']['Row'];
 type CommentRow = Database['public']['Tables']['post_comments']['Row'];
 
 export const PAGE_SIZE = 20;
+
+/**
+ * Category sentinel used by the county gap-signal rows in `gap_analytics`. These
+ * rows are category-agnostic, so they are fetched by location rather than being
+ * matched against a real business category.
+ */
+const COUNTY_SIGNAL_CATEGORY = 'County Gap Signal';
+
+/**
+ * The geo tables spell a few counties differently from the app's canonical list
+ * (`Murang'a` vs `Murang’a`, `Trans-Nzoia` vs `Trans Nzoia`). Normalise to the
+ * canonical name so location labels and the county-keyed analytics/reports all
+ * agree.
+ */
+const CANONICAL_COUNTY = new Map<string, string>();
+function normaliseCounty(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+for (const c of COUNTIES) CANONICAL_COUNTY.set(normaliseCounty(c.name), c.name);
+function canonicalCounty(raw: string): string {
+  return CANONICAL_COUNTY.get(normaliseCounty(raw)) ?? raw;
+}
 
 const DEFAULT_CATEGORY_ICONS = {
   mitumba: 'shopping-bag',
@@ -149,8 +183,9 @@ function mapGapReport(r: GapReportRow): GapReport {
   };
 }
 
-function mapAnalytics(a: AnalyticsRow): GapAnalytics {
+function mapSectorAnalytics(a: AnalyticsRow): GapAnalytics {
   return {
+    kind: 'sector',
     category: a.category,
     location: a.location,
     consumerDemandPct: a.consumer_demand_pct,
@@ -159,6 +194,55 @@ function mapAnalytics(a: AnalyticsRow): GapAnalytics {
     demandColor: '#001533',
     saturationLabel: `${a.market_saturation_pct}% (${levelBand(a.market_saturation_pct)})`,
     saturationColor: '#815600',
+  };
+}
+
+function mapArchetype(a: ArchetypeRow): GapArchetype {
+  return {
+    code: a.code,
+    label: a.label,
+    rule: a.rule,
+    typicalGaps: a.typical_gaps,
+    evidenceLevel: a.evidence_level,
+  };
+}
+
+function mapCountyAnalytics(
+  a: AnalyticsRow,
+  archetype: GapArchetype | null,
+  sources: DataSource[],
+): CountyAnalytics {
+  return {
+    kind: 'county',
+    category: a.category,
+    location: a.location,
+    countyCode: a.county_code,
+    population2023Proj: a.population_2023_proj,
+    gdpUsdBn2024: a.gdp_usd_bn_2024,
+    gdpPerCapitaUsd2024: a.gdp_per_capita_usd_2024,
+    gdpPerCapitaVsNational: a.gdp_per_capita_vs_national,
+    avgGdpGrowthPct: a.avg_gdp_growth_2020_24_pct,
+    highGrowth: a.high_growth,
+    formalInclusionPct2024: a.formal_inclusion_pct_2024,
+    finAccessFlag: a.fin_access_flag,
+    msmeSharePct2016: a.msme_share_pct_2016,
+    msmeShareToPopShare: a.msme_share_to_pop_share,
+    caipPhase1: a.caip_phase1_cohort_2025,
+    caipNearComplete: a.caip_near_complete_2026,
+    documentedNotes: a.documented_notes,
+    archetype,
+    sources,
+  };
+}
+
+function mapDataSource(s: DataSourceRow): DataSource {
+  return {
+    id: s.id,
+    title: s.title,
+    publisher: s.publisher,
+    url: s.url,
+    year: s.year,
+    reliability: s.reliability,
   };
 }
 
@@ -392,6 +476,25 @@ export async function fetchCategories(): Promise<ExploreCategory[]> {
 }
 
 /* ==================================================================== */
+/* reference sources                                                    */
+/* ==================================================================== */
+
+/**
+ * Curated articles/sources backing the circle's market data. Newest first so the
+ * home "Reads" strip leads with the most recent material.
+ */
+export async function fetchDataSources(limit = PAGE_SIZE): Promise<DataSource[]> {
+  const { data, error } = await supabase
+    .from('data_sources')
+    .select('*')
+    .order('year', { ascending: false, nullsFirst: false })
+    .order('title', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return ((data ?? []) as DataSourceRow[]).map(mapDataSource);
+}
+
+/* ==================================================================== */
 /* suppliers                                                            */
 /* ==================================================================== */
 
@@ -417,33 +520,182 @@ export async function fetchSuppliers(opts?: {
 /* gap map                                                              */
 /* ==================================================================== */
 
-export async function fetchGapReports(category?: string | null): Promise<GapReport[]> {
-  let query = supabase.from('gap_reports').select('*').order('title', { ascending: true });
-  if (category) query = query.eq('category', category);
+/** First token of a free-form location, used for `ilike` matching. */
+function locationNeedle(location: string): string {
+  return location.split(',')[0]?.trim() || location.trim();
+}
 
-  const { data, error } = await query;
+async function fetchArchetype(code: string | null): Promise<GapArchetype | null> {
+  if (!code) return null;
+  const { data, error } = await supabase
+    .from('gap_archetypes')
+    .select('*')
+    .eq('code', code)
+    .maybeSingle();
   if (error) throw error;
-  return ((data ?? []) as GapReportRow[]).map(mapGapReport);
+  return data ? mapArchetype(data as ArchetypeRow) : null;
+}
+
+async function fetchSourcesByIds(ids: string[]): Promise<DataSource[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await supabase.from('data_sources').select('*').in('id', ids);
+  if (error) throw error;
+  return ((data ?? []) as DataSourceRow[]).map(mapDataSource);
 }
 
 /**
- * Returns `null` when the dataset has no row for this category/location. The UI
- * shows an explicit "no data yet" state — it must never invent percentages.
+ * Deep-dive reports for the selection. Combines category-specific reports with
+ * the county gap-signal reports for the location, de-duplicated by id. Either
+ * filter may be omitted; passing neither returns the category-agnostic county
+ * reports only (an empty set).
+ */
+export async function fetchGapReports(opts?: {
+  category?: string | null;
+  location?: string | null;
+}): Promise<GapReport[]> {
+  const category = opts?.category?.trim() || null;
+  const county = opts?.location ? locationNeedle(opts.location) : null;
+
+  const rows: GapReportRow[] = [];
+
+  if (category) {
+    const { data, error } = await supabase
+      .from('gap_reports')
+      .select('*')
+      .eq('category', category)
+      .order('title', { ascending: true });
+    if (error) throw error;
+    rows.push(...((data ?? []) as GapReportRow[]));
+  }
+
+  if (county) {
+    const { data, error } = await supabase
+      .from('gap_reports')
+      .select('*')
+      .eq('category', COUNTY_SIGNAL_CATEGORY)
+      .ilike('location', `%${county}%`)
+      .order('title', { ascending: true });
+    if (error) throw error;
+    rows.push(...((data ?? []) as GapReportRow[]));
+  }
+
+  const seen = new Set<string>();
+  const unique: GapReportRow[] = [];
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    unique.push(row);
+  }
+  return unique.map(mapGapReport);
+}
+
+/**
+ * Analytics for a category + location. A sector row (real demand/saturation) is
+ * preferred; when none exists we fall back to the county gap-signal row, which
+ * is category-agnostic. Returns `null` when the dataset holds neither — the UI
+ * shows an explicit "no data yet" state and never invents percentages.
  */
 export async function fetchAnalytics(
   category: string,
   location: string,
 ): Promise<GapAnalytics | null> {
-  const needle = location.split(',')[0]?.trim() ?? location;
-  const { data, error } = await supabase
+  const needle = locationNeedle(location);
+
+  const sector = await supabase
     .from('gap_analytics')
     .select('*')
     .eq('category', category)
     .ilike('location', `%${needle}%`)
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
-  return data ? mapAnalytics(data as AnalyticsRow) : null;
+  if (sector.error) throw sector.error;
+  if (sector.data) return mapSectorAnalytics(sector.data as AnalyticsRow);
+
+  const county = await supabase
+    .from('gap_analytics')
+    .select('*')
+    .eq('category', COUNTY_SIGNAL_CATEGORY)
+    .ilike('location', `%${needle}%`)
+    .limit(1)
+    .maybeSingle();
+  if (county.error) throw county.error;
+  if (!county.data) return null;
+
+  const row = county.data as AnalyticsRow;
+  const [archetype, sources] = await Promise.all([
+    fetchArchetype(row.archetype),
+    fetchSourcesByIds(row.source_ids ?? []),
+  ]);
+  return mapCountyAnalytics(row, archetype, sources);
+}
+
+/**
+ * Every selectable location, loaded from the geo reference tables. Granular
+ * levels (sub-county, constituency, ward, town) each carry the county they
+ * resolve to so the county-keyed analytics/reports can be queried.
+ */
+export async function fetchGeoLocations(): Promise<LocationOption[]> {
+  const [counties, subcounties, constituencies, wards, towns] = await Promise.all([
+    supabase.from('counties').select('code, name').order('name', { ascending: true }),
+    supabase.from('subcounties').select('code, name, county_code').order('name', { ascending: true }),
+    supabase
+      .from('constituencies')
+      .select('code, name, county_code')
+      .order('name', { ascending: true }),
+    supabase.from('wards').select('code, name, constituency_code').order('name', { ascending: true }),
+    supabase
+      .from('towns')
+      .select('code, name, county_code, county_label')
+      .order('name', { ascending: true }),
+  ]);
+
+  for (const res of [counties, subcounties, constituencies, wards, towns]) {
+    if (res.error) throw res.error;
+  }
+
+  const countyName = new Map<string, string>();
+  for (const c of (counties.data ?? []) as Pick<CountyRow, 'code' | 'name'>[]) {
+    countyName.set(c.code, canonicalCounty(c.name));
+  }
+  const constituencyCounty = new Map<string, string>();
+  for (const c of (constituencies.data ?? []) as Pick<ConstituencyRow, 'code' | 'county_code'>[]) {
+    constituencyCounty.set(c.code, c.county_code);
+  }
+
+  const options: LocationOption[] = [];
+  const add = (label: string, county: string, level: LocationOption['level'], code: string) => {
+    options.push({ value: `${label} · ${level} · ${code}`, label, county, level });
+  };
+
+  for (const c of (counties.data ?? []) as Pick<CountyRow, 'code' | 'name'>[]) {
+    const name = canonicalCounty(c.name);
+    add(name, name, 'county', c.code);
+  }
+  for (const s of (subcounties.data ?? []) as Pick<SubcountyRow, 'code' | 'name' | 'county_code'>[]) {
+    add(s.name, countyName.get(s.county_code) ?? canonicalCounty(s.name), 'subcounty', s.code);
+  }
+  for (const c of (constituencies.data ?? []) as Pick<
+    ConstituencyRow,
+    'code' | 'name' | 'county_code'
+  >[]) {
+    add(c.name, countyName.get(c.county_code) ?? canonicalCounty(c.name), 'constituency', c.code);
+  }
+  for (const w of (wards.data ?? []) as Pick<WardRow, 'code' | 'name' | 'constituency_code'>[]) {
+    const code = constituencyCounty.get(w.constituency_code);
+    const county = (code && countyName.get(code)) || 'Kenya';
+    add(w.name, county, 'ward', w.code);
+  }
+  for (const t of (towns.data ?? []) as Pick<
+    TownRow,
+    'code' | 'name' | 'county_code' | 'county_label'
+  >[]) {
+    const county =
+      (t.county_code && countyName.get(t.county_code)) ||
+      canonicalCounty(t.county_label ?? t.name);
+    add(t.name, county, 'town', t.code);
+  }
+
+  return options;
 }
 
 /* ==================================================================== */

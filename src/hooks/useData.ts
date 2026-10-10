@@ -2,7 +2,9 @@ import { useCallback } from 'react';
 import {
   fetchAnalytics,
   fetchCategories,
+  fetchDataSources,
   fetchGapReports,
+  fetchGeoLocations,
   fetchLikedPostIds,
   fetchMyMentorApplication,
   fetchPostCategories,
@@ -40,6 +42,11 @@ export function useCategories() {
   return useAsyncData(() => fetchCategories(), []);
 }
 
+/** Curated articles/sources shown on the home "Reads" strip. */
+export function useDataSources(limit?: number) {
+  return useAsyncData(() => fetchDataSources(limit), [limit]);
+}
+
 export function useSuppliers(opts?: { category?: string | null; county?: string | null }) {
   const category = opts?.category ?? null;
   const county = opts?.county ?? null;
@@ -54,8 +61,19 @@ export function useSuppliers(opts?: { category?: string | null; county?: string 
   );
 }
 
-export function useGapReports(category: string | null = null) {
-  return useAsyncData(() => fetchGapReports(category), [category]);
+/**
+ * Deep-dive reports for a category + location. County gap-signal reports are
+ * included for the location as well as the category-specific ones.
+ */
+export function useGapReports(opts?: { category?: string | null; location?: string | null }) {
+  const category = opts?.category ?? null;
+  const location = opts?.location ?? null;
+  return useAsyncData(() => fetchGapReports({ category, location }), [category, location]);
+}
+
+/** Selectable locations loaded from the geo reference tables. */
+export function useGeoLocations() {
+  return useAsyncData(() => fetchGeoLocations(), []);
 }
 
 /**

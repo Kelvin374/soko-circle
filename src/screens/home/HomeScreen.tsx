@@ -1,4 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Linking from 'expo-linking';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -10,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import TopAppBar from '../../components/TopAppBar';
+import AdBanner from '../../components/AdBanner';
 import ThemedText from '../../components/ThemedText';
 import Icon from '../../components/Icon';
 import PostComments from '../../components/PostComments';
@@ -17,12 +19,19 @@ import CreatePostSheet from '../../components/CreatePostSheet';
 import ErrorState from '../../components/ErrorState';
 import EmptyState from '../../components/EmptyState';
 import { colors } from '../../theme/colors';
+import { fonts } from '../../theme/typography';
 import { spacing, radii, shadows } from '../../theme';
 import { rgba } from '../../utils/color';
 import { fmtTime, greetingForDate } from '../../lib/format';
-import { useFeed, useLikedPostIds, usePostCategories, useProfile } from '../../hooks/useData';
+import {
+  useDataSources,
+  useFeed,
+  useLikedPostIds,
+  usePostCategories,
+  useProfile,
+} from '../../hooks/useData';
 import { setPostLiked } from '../../lib/api';
-import { FeedPost } from '../../types';
+import { DataSource, FeedPost } from '../../types';
 
 type PostCardProps = {
   post: FeedPost;
@@ -173,6 +182,61 @@ function PostSkeleton() {
   );
 }
 
+type SourceCardProps = {
+  source: DataSource;
+  onOpen: (source: DataSource) => void;
+};
+
+/** A snippet of a reference article; tapping it opens the source page. */
+function SourceCard({ source, onOpen }: SourceCardProps) {
+  const meta = [source.publisher, source.year ? String(source.year) : null]
+    .filter(Boolean)
+    .join(' • ');
+
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={`Open source: ${source.title}`}
+      onPress={() => onOpen(source)}
+      style={({ pressed }) => [styles.sourceCard, pressed && styles.sourceCardPressed]}
+    >
+      <View style={styles.sourceBadge}>
+        <ThemedText variant="labelSm" color={colors.secondary} style={styles.sourceBadgeText}>
+          {source.reliability}
+        </ThemedText>
+      </View>
+
+      <ThemedText
+        variant="labelSm"
+        color={colors.primary}
+        numberOfLines={3}
+        style={styles.sourceTitle}
+      >
+        {source.title}
+      </ThemedText>
+
+      {meta ? (
+        <ThemedText
+          variant="labelSm"
+          color={colors.onSurfaceVariant}
+          numberOfLines={1}
+          style={{ fontSize: 11 }}
+        >
+          {meta}
+        </ThemedText>
+      ) : null}
+
+      <View style={styles.sourceFooter}>
+        <Icon name="globe-alt" size={14} color={colors.secondary} />
+        <ThemedText variant="labelSm" color={colors.secondary} style={{ fontSize: 11 }}>
+          Read source
+        </ThemedText>
+        <Icon name="arrow-up-right" size={14} color={colors.secondary} />
+      </View>
+    </Pressable>
+  );
+}
+
 export default function HomeScreen() {
   const [activeChip, setActiveChip] = useState<string | null>(null);
   const feed = useFeed(activeChip);
@@ -185,6 +249,17 @@ export default function HomeScreen() {
 
   const categoriesState = usePostCategories();
   const chips = useMemo(() => ['All', ...(categoriesState.data ?? [])], [categoriesState.data]);
+
+  const sources = useDataSources(8);
+
+  const handleOpenSource = useCallback(async (source: DataSource) => {
+    if (!source.url) return;
+    try {
+      await Linking.openURL(source.url);
+    } catch {
+      // A malformed/unsupported URL should not crash the screen.
+    }
+  }, []);
 
   const likedIds = useMemo(() => liked.data ?? new Set<string>(), [liked.data]);
 
@@ -251,6 +326,39 @@ export default function HomeScreen() {
               {greetingForDate()}, {profile.data?.fullName || 'Trader'}!
             </ThemedText>
           </View>
+
+        {/* Rotating ad banner (placeholder inventory, ready to wire to a backend). */}
+        <AdBanner />
+
+        {/* Reads come from public.data_sources; tapping a card opens the article. */}
+        {(sources.loading || (sources.data?.length ?? 0) > 0) && (
+          <View style={styles.reads}>
+            <View style={styles.readsHeader}>
+              <ThemedText variant="labelSm" color={colors.primary} style={styles.readsTitle}>
+                Market reads
+              </ThemedText>
+              <ThemedText
+                variant="labelSm"
+                color={colors.onSurfaceVariant}
+                style={{ fontSize: 11 }}
+              >
+                Sources behind the circle
+              </ThemedText>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.sourceRow}
+            >
+              {sources.loading
+                ? [0, 1].map((i) => <View key={i} style={styles.sourceSkeleton} />)
+                : (sources.data ?? []).map((source) => (
+                    <SourceCard key={source.id} source={source} onOpen={handleOpenSource} />
+                  ))}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Filter chips mirror the categories actually present in the feed. */}
         {chips.length > 1 && (
@@ -380,6 +488,59 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, gap: spacing.sectionPadding },
 
   welcome: { gap: 4 },
+
+  reads: { gap: 12 },
+  readsHeader: { gap: 2 },
+  readsTitle: {
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+  },
+  sourceRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingRight: 16,
+  },
+  sourceCard: {
+    width: 260,
+    backgroundColor: 'rgba(255,255,255,0.6)',
+    borderRadius: radii.xl,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(21,42,74,0.06)',
+    gap: 8,
+    ...shadows.card,
+  },
+  sourceCardPressed: { opacity: 0.85 },
+  sourceBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.surfaceContainerLow,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radii.sm,
+  },
+  sourceBadgeText: {
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+  },
+  sourceTitle: {
+    fontFamily: fonts.title,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  sourceFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  sourceSkeleton: {
+    width: 260,
+    height: 150,
+    borderRadius: radii.xl,
+    backgroundColor: colors.surfaceContainerHigh,
+  },
 
   chipRow: {
     flexDirection: 'row',
